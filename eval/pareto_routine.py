@@ -245,7 +245,7 @@ def main() -> int:
                 "repeats": [round(x, 4) for x in rates]}
         print(row)
 
-    # 过程指标（面试素材）：正确率 vs 按时率拆开看（全重复合并）
+    # 过程指标：正确率 vs 按时率拆开看（全重复合并）
     print("\n==== 拆解（correct% / on_time%，全重复合并）====")
     for strat in strategies:
         row = f"{strat:13s}"
