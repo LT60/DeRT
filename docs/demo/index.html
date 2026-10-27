@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeRT 调度回放 — 同一任务，四种时间预算</title>
+<style>
+:root{
+  --bg:#fafafb; --surface:#fff; --muted-bg:#f1f1f4;
+  --text:#1a1a1e; --text-muted:#5c5c66; --border:#e4e4e9;
+  --brand:#4b3fe3; --brand-soft:#eeecff; --brand-deep:#322b9e;
+  --fast:#0b8fb5; --fast-soft:#e5f4f9;
+  --green:#0e9f6e; --green-soft:#e6f7f0;
+  --amber:#c27803; --amber-soft:#fdf3e0;
+  --red:#d0342c; --red-soft:#fdeae9;
+  --tool:#6b6b7a;
+  --mono:"JetBrains Mono","Cascadia Code",Consolas,monospace;
+  --sans:"SF Pro Text","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);line-height:1.7;font-size:15px}
+.wrap{max-width:1080px;margin:0 auto;padding:40px 28px 80px}
+
+.kicker{font-family:var(--mono);font-size:12.5px;color:var(--brand);letter-spacing:1px}
+h1{font-size:29px;letter-spacing:-0.8px;line-height:1.35;margin:8px 0 6px}
+.sub{color:var(--text-muted);font-size:14.5px;margin-bottom:26px}
+
+.taskcard{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--brand);
+  border-radius:0 12px 12px 0;padding:14px 20px;margin-bottom:26px}
+.taskcard .lbl{font-size:12px;color:var(--text-muted);font-family:var(--mono);margin-bottom:5px}
+.taskcard .txt{font-size:15px}
+.taskcard .need{margin-top:8px;font-size:13px;color:var(--text-muted)}
+.taskcard .need code{font-family:var(--mono);background:var(--muted-bg);padding:1px 6px;border-radius:5px;font-size:12.5px}
+
+/* 选择器 */
+.picker{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:18px}
+.picker .grp{font-size:12px;color:var(--text-muted);font-family:var(--mono);margin-right:2px}
+.picker .grp:not(:first-child){margin-left:14px;padding-left:14px;border-left:1px solid var(--border)}
+button.run{font-family:var(--sans);font-size:13.5px;font-weight:600;color:var(--text);
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:7px 13px;cursor:pointer;display:flex;align-items:center;gap:7px;transition:.13s}
+button.run:hover{border-color:#c9c9d4}
+button.run.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-deep)}
+button.run .dot{width:7px;height:7px;border-radius:50%;flex:none}
+.dot.ok{background:var(--green)} .dot.bad{background:var(--red)} .dot.warn{background:var(--amber)}
+
+/* HUD */
+.hud{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);
+  border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px}
+.hud .cell{background:var(--surface);padding:12px 16px}
+.hud .k{font-size:11.5px;color:var(--text-muted);font-family:var(--mono);letter-spacing:.4px}
+.hud .v{font-family:var(--mono);font-size:21px;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums}
+.hud .v.small{font-size:16px;padding-top:4px}
+.hud .v.over{color:var(--red)}
+.hud .v.strong{color:var(--brand)} .hud .v.fast{color:var(--fast)}
+
+/* 时间轴 */
+.tl{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:0 0 4px;position:relative;overflow:hidden}
+.tlhead{padding:14px 18px 4px}
+.lanes{position:relative;padding:0 18px 10px}
+.lane{display:grid;grid-template-columns:76px 1fr;gap:12px;align-items:stretch;min-height:34px}
+.lane .name{font-family:var(--mono);font-size:11.5px;color:var(--text-muted);padding-top:6px}
+.track{position:relative}
+.track .grid{position:absolute;inset:0;pointer-events:none}
+.track .grid i{position:absolute;top:0;bottom:0;width:1px;background:var(--border)}
+.row{position:relative;height:26px;margin:3px 0}
+.bar{position:absolute;top:0;height:26px;opacity:0;transition:opacity .12s}
+.bar.show{opacity:1}
+.bar .clip{position:absolute;inset:0;border-radius:5px;overflow:hidden}
+.bar .fill{position:absolute;inset:0}
+.bar .ttft{position:absolute;top:0;bottom:0;left:0;background:rgba(255,255,255,.34)}
+.bar.llm-strong .fill{background:var(--brand)}
+.bar.llm-fast .fill{background:var(--fast)}
+.bar.tool .fill{background:var(--tool)}
+/* 标签是独立层、画在条形右侧：条再窄也不会被裁 */
+.barlab{position:absolute;height:18px;display:flex;align-items:center;margin-left:7px;
+  font-family:var(--mono);font-size:10.5px;white-space:nowrap;background:var(--surface);
+  padding:0 5px;border-radius:4px;opacity:0;transition:opacity .12s;z-index:4}
+.barlab.show{opacity:1}
+.barlab.llm-strong{color:var(--brand)}
+.barlab.llm-fast{color:var(--fast)}
+.barlab.tool{color:var(--tool)}
+
+.deadline{position:absolute;top:0;bottom:0;width:2px;background:var(--red);z-index:6}
+.deadline .tag{position:absolute;top:-17px;left:-1px;font-family:var(--mono);font-size:10.5px;
+  color:#fff;background:var(--red);padding:1px 6px;border-radius:4px;white-space:nowrap}
+/* 预算线靠右时标签向左挂，避免被卡片右边缘裁掉 */
+.deadline .tag.left{left:-7px;transform:translateX(-100%)}
+.overband{position:absolute;top:0;bottom:0;right:0;background:var(--red-soft);opacity:.55;z-index:0;
+  border-left:1px solid rgba(208,52,44,.25)}
+.playhead{position:absolute;top:0;bottom:0;width:1px;background:var(--text);opacity:.35;z-index:7}
+.playhead .t{position:absolute;bottom:-1px;left:3px;font-family:var(--mono);font-size:10px;color:var(--text-muted)}
+
+.batchb{position:absolute;top:0;height:10px;border-left:1.5px solid var(--fast);border-right:1.5px solid var(--fast);
+  border-top:1.5px solid var(--fast);border-radius:3px 3px 0 0;opacity:0}
+.batchb.show{opacity:.85}
+.batchb .l{position:absolute;top:10px;left:50%;transform:translateX(-50%);font-family:var(--mono);
+  font-size:10px;color:var(--fast);white-space:nowrap}
+
+.evt{position:absolute;height:22px;padding:0 9px;border-radius:11px;display:flex;align-items:center;
+  font-family:var(--mono);font-size:10.5px;white-space:nowrap;opacity:0;transform:translateX(-50%)}
+.evt.show{opacity:1}
+.evt.wrap{background:var(--amber-soft);color:var(--amber);border:1px solid rgba(194,120,3,.35)}
+.evt.cmp{background:var(--brand-soft);color:var(--brand-deep);border:1px solid rgba(75,63,227,.3)}
+
+.ctl{display:flex;align-items:center;gap:10px;padding:12px 18px 16px;border-top:1px solid var(--border);margin-top:10px}
+.ctl button{font-family:var(--sans);font-size:13px;font-weight:600;background:var(--surface);
+  border:1px solid var(--border);border-radius:7px;padding:6px 14px;cursor:pointer}
+.ctl button:hover{border-color:#c9c9d4}
+.ctl button.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.ctl .sp{font-size:10px;color:var(--text-muted);font-family:var(--mono)}
+.ctl .speed{display:flex;gap:0;border:1px solid var(--border);border-radius:7px;overflow:hidden}
+.ctl .speed button{border:none;border-radius:0;padding:6px 11px}
+.ctl .speed button+button{border-left:1px solid var(--border)}
+.ctl .speed button.on{background:var(--brand-soft);color:var(--brand-deep)}
+
+/* 结果 */
+.result{background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  margin-bottom:14px;overflow:hidden;visibility:hidden}
+.result.show{visibility:visible}
+.result .head{display:flex;flex-wrap:wrap;gap:16px;align-items:center;padding:13px 18px;
+  border-bottom:1px solid var(--border);background:var(--muted-bg)}
+.badge{font-size:12.5px;font-weight:650;padding:3px 11px;border-radius:999px;font-family:var(--mono)}
+.badge.ok{background:var(--green-soft);color:var(--green)}
+.badge.bad{background:var(--red-soft);color:var(--red)}
+.badge.warn{background:var(--amber-soft);color:var(--amber)}
+.badge.info{background:var(--brand-soft);color:var(--brand-deep)}
+.result .ans{padding:15px 18px;font-size:14px;white-space:pre-wrap;max-height:280px;overflow-y:auto;
+  font-family:var(--sans)}
+.result .ans.cut{border-left:3px solid var(--red)}
+.result .meta{padding:0 18px 14px;font-size:12.5px;color:var(--text-muted);font-family:var(--mono)}
+
+/* 对比条 */
+.cmp{margin-top:26px}
+.cmp h2{font-size:16px;margin-bottom:4px}
+.cmp .lead{font-size:13px;color:var(--text-muted);margin-bottom:14px}
+.cmp .line{display:grid;grid-template-columns:182px 1fr 92px;gap:12px;align-items:center;
+  padding:6px 0;cursor:pointer;border-radius:7px}
+.cmp .line:hover{background:var(--muted-bg)}
+.cmp .line .nm{font-size:11.5px;font-family:var(--mono);color:var(--text-muted);text-align:right;
+  white-space:nowrap}
+.cmp .line .track2{position:relative;height:19px;background:var(--muted-bg);border-radius:5px;overflow:hidden}
+.cmp .line .b{position:absolute;top:0;bottom:0;left:0;border-radius:5px}
+.cmp .line .b.ok{background:var(--green)} .cmp .line .b.bad{background:var(--red)}
+.cmp .line .mark{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--text);opacity:.55}
+.cmp .line .tt{font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums}
+.cmp .axis{display:grid;grid-template-columns:182px 1fr 92px;gap:12px;font-family:var(--mono);
+  font-size:10.5px;color:var(--text-muted);margin-top:5px}
+
+footer{margin-top:34px;padding-top:16px;border-top:1px solid var(--border);
+  font-size:12.5px;color:var(--text-muted);line-height:1.85}
+footer code{font-family:var(--mono);background:var(--muted-bg);padding:1px 5px;border-radius:4px;font-size:12px}
+.err{background:var(--red-soft);border:1px solid rgba(208,52,44,.3);color:var(--red);
+  padding:16px 20px;border-radius:10px;font-family:var(--mono);font-size:13px}
+@media(max-width:720px){
+  .hud{grid-template-columns:repeat(2,1fr)}
+  .lane{grid-template-columns:60px 1fr}
+  .cmp .line,.cmp .axis{grid-template-columns:96px 1fr 78px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="kicker">DeRT · DEADLINE-AWARE RUNTIME · 调度回放</div>
+  <h1>同一任务，四种时间预算</h1>
+  <p class="sub">任务是同一句话、模型是同一对、代码是同一份。唯一变量是<b>时间预算</b>——看调度器如何据此改变自己的行为。</p>
+
+  <div class="taskcard">
+    <div class="lbl">TASK</div>
+    <div class="txt" id="tasktext">—</div>
+    <div class="need" id="taskneed"></div>
+  </div>
+
+  <div class="picker" id="picker"></div>
+
+  <div class="hud">
+    <div class="cell">
+      <div class="k">剩余预算</div>
+      <div class="v" id="h-remain">—</div>
+    </div>
+    <div class="cell">
+      <div class="k">当前档位</div>
+      <div class="v small" id="h-tier">—</div>
+    </div>
+    <div class="cell">
+      <div class="k">已用步数</div>
+      <div class="v" id="h-steps">—</div>
+    </div>
+    <div class="cell">
+      <div class="k">累计输出 TOKENS</div>
+      <div class="v" id="h-tok">—</div>
+    </div>
+  </div>
+
+  <div class="tl">
+    <div class="tlhead"></div>
+    <div class="lanes" id="lanes"></div>
+    <div class="ctl">
+      <button class="primary" id="btn-play">重播</button>
+      <div class="speed" id="speed">
+        <button data-s="0.5">0.5×</button>
+        <button data-s="1" class="on">1×</button>
+        <button data-s="2">2×</button>
+      </div>
+      <span class="sp">真实耗时回放 · 时间轴单位：秒</span>
+    </div>
+  </div>
+
+  <div class="result" id="result">
+    <div class="head" id="res-head"></div>
+    <div class="ans" id="res-ans"></div>
+    <div class="meta" id="res-meta"></div>
+  </div>
+
+  <div class="cmp">
+    <h2>四档预算放在一起看</h2>
+    <p class="lead">条形长度 = 实际耗时，竖线 = 该档预算。点击任意一行切换到对应回放。</p>
+    <div id="cmp-body"></div>
+  </div>
+
+  <footer>
+    数据来源：本项目 <code>eval/make_demo.py</code> 在<b>当前代码</b>上的一次小批量真实运行（全实时、禁用缓存），
+    每个回放对应一次真实的 LLM 调用序列——不是示意图，也不是事后编排。<br>
+    渲染依据 <code>src/instrument.py</code> 落盘的全链路 trace：模型调用（含流式 TTFT 分段）、工具调用（含并行批 id）、
+    收尾触发事件、预算倒计时。预算线右侧的淡红区域表示已超预算。
+  </footer>
+
+</div>
+
+<script id="demo-data" type="application/json">{"task": "检查最近 200 帧的检测质量，并渲染 latest 片段的可视化报告。报告保存路径是什么？", "expected": "需含 reports/latest.png 与检出率 90.6%（规则判分，不看格式前缀）", "generated": "2026-09-26 18:56", "runs": [{"label": "DeRT · 2s 预算", "group": "dert", "strategy": "DeRT v1.1 · 双档路由", "budget": 2.0, "total": 4.706, "stop_reason": "final", "steps": 2, "answer": "FINAL: 最近 200 帧的检测质量检查结果显示，检测率为 90.6%，平均每帧包含 2", "expected": "需含 reports/latest.png 与检出率值", "correct": false, "on_time": false, "wrap_up": true, "compress": false, "events": [{"ts": 0.0, "kind": "run_start", "task": "检查最近 200 帧的检测质量，并渲染 latest 片段的可视化报告。报告保存路径是什么？", "deadline": 2.0, "model": null, "max_steps": 8}, {"ts": 1.8635, "kind": "llm_call", "step": 1, "model": "qwen2.5:7b", "ttft": 1.1493, "total": 1.8633, "tokens_in": 647, "tokens_out": 44, "cache_hit": false}, {"ts": 2.4648, "kind": "tool_call", "tool": "detection_stats", "duration": 0.6005, "status": "ok", "batch": "b775a0d8"}, {"ts": 3.365, "kind": "tool_call", "tool": "render_report", "duration": 1.5002, "status": "ok", "batch": "b775a0d8"}, {"ts": 3.3654, "kind": "wrap_up", "remaining": -1.365, "min_step": 1.2}, {"ts": 4.7057, "kind": "llm_call", "step": 2, "model": "qwen2.5:7b", "ttft": 0.1509, "total": 1.3402, "tokens_in": 341, "tokens_out": 30, "cache_hit": false}, {"ts": 4.7062, "kind": "run_end", "stop_reason": "final", "steps": 2, "total_time": 4.7062, "answer": "FINAL: 最近 200 帧的检测质量检查结果显示，检测率为 90.6%，平均每帧包含 2"}]}, {"label": "DeRT · 4s 预算", "group": "dert", "strategy": "DeRT v1.1 · 双档路由", "budget": 4.0, "total": 2.612, "stop_reason": "final", "steps": 2, "answer": "FINAL: 最近 200 帧检测质量：检出率 90.6%，平均每帧目标数 2.2，定位抖动 0.81 px（抖动较小，定位稳定）。latest 片段可视化报告已渲染完成，保存路径为 **reports/latest.png**（共渲染 100 帧）。", "expected": "需含 reports/latest.png 与检出率值", "correct": true, "on_time": true, "wrap_up": false, "compress": false, "events": [{"ts": 0.0, "kind": "run_start", "task": "检查最近 200 帧的检测质量，并渲染 latest 片段的可视化报告。报告保存路径是什么？", "deadline": 4.0, "model": null, "max_steps": 8}, {"ts": 0.6247, "kind": "llm_call", "step": 1, "model": "deepseek-chat", "ttft": 0.3275, "total": 0.6245, "tokens_in": 807, "tokens_out": 84, "cache_hit": false}, {"ts": 1.2254, "kind": "tool_call", "tool": "detection_stats", "duration": 0.6003, "status": "ok", "batch": "ba518866"}, {"ts": 2.1256, "kind": "tool_call", "tool": "render_report", "duration": 1.5003, "status": "ok", "batch": "ba518866"}, {"ts": 2.6121, "kind": "llm_call", "step": 2, "model": "deepseek-chat", "ttft": 0.2073, "total": 0.486, "tokens_in": 971, "tokens_out": 70, "cache_hit": false}, {"ts": 2.6124, "kind": "run_end", "stop_reason": "final", "steps": 2, "total_time": 2.6123, "answer": "FINAL: 最近 200 帧检测质量：检出率 90.6%，平均每帧目标数 2.2，定位抖动 0.81 px（抖动较小，定位稳定）。latest 片段可视化报告已渲染完成，保存路径为 **reports/latest.png**（共渲染 100 帧）。"}]}, {"label": "DeRT · 8s 预算", "group": "dert", "strategy": "DeRT v1.1 · 双档路由", "budget": 8.0, "total": 2.885, "stop_reason": "final", "steps": 2, "answer": "FINAL: 最近 200 帧检测质量：检出率 90.6%，平均每帧目标数 2.2，定位抖动 0.81 px。latest 片段可视化报告已渲染（100 帧），保存路径为 `reports/latest.png`。", "expected": "需含 reports/latest.png 与检出率值", "correct": true, "on_time": true, "wrap_up": false, "compress": false, "events": [{"ts": 0.0, "kind": "run_start", "task": "检查最近 200 帧的检测质量，并渲染 latest 片段的可视化报告。报告保存路径是什么？", "deadline": 8.0, "model": null, "max_steps": 8}, {"ts": 0.6655, "kind": "llm_call", "step": 1, "model": "deepseek-chat", "ttft": 0.4485, "total": 0.6652, "tokens_in": 807, "tokens_out": 90, "cache_hit": false}, {"ts": 1.2665, "kind": "tool_call", "tool": "detection_stats", "duration": 0.6003, "status": "ok", "batch": "c3726f0b"}, {"ts": 2.1667, "kind": "tool_call", "tool": "render_report", "duration": 1.5001, "status": "ok", "batch": "c3726f0b"}, {"ts": 2.885, "kind": "llm_call", "step": 2, "model": "deepseek-chat", "ttft": 0.4803, "total": 0.7178, "tokens_in": 977, "tokens_out": 60, "cache_hit": false}, {"ts": 2.885, "kind": "run_end", "stop_reason": "final", "steps": 2, "total_time": 2.885, "answer": "FINAL: 最近 200 帧检测质量：检出率 90.6%，平均每帧目标数 2.2，定位抖动 0.81 px。latest 片段可视化报告已渲染（100 帧），保存路径为 `reports/latest.png`。"}]}, {"label": "DeRT · 30s 预算", "group": "dert", "strategy": "DeRT v1.1 · 双档路由", "budget": 30.0, "total": 2.845, "stop_reason": "final", "steps": 2, "answer": "FINAL: 最近 200 帧检测质量：检出率 90.6%，平均每帧目标数 2.2，定位抖动 0.81 px。latest 片段可视化报告已渲染完成（100 帧），保存路径为 `reports/latest.png`。", "expected": "需含 reports/latest.png 与检出率值", "correct": true, "on_time": true, "wrap_up": false, "compress": false, "events": [{"ts": 0.0, "kind": "run_start", "task": "检查最近 200 帧的检测质量，并渲染 latest 片段的可视化报告。报告保存路径是什么？", "deadline": 30.0, "model": null, "max_steps": 8}, {"ts": 0.6039, "kind": "llm_call", "step": 1, "model": "deepseek-chat", "ttft": 0.2567, "total": 0.6037, "tokens_in": 807, "tokens_out": 90, "cache_hit": false}, {"ts": 1.2046, "kind": "tool_call", "tool": "detection_stats", "duration": 0.6001, "status": "ok", "batch": "7f039a42"}, {"ts": 2.1047, "kind": "tool_call", "tool": "render_report", "duration": 1.5001, "status": "ok", "batch": "7f039a42"}, {"ts": 2.8447, "kind": "llm_call", "step": 2, "model": "deepseek-chat", "ttft": 0.5213, "total": 0.7392, "tokens_in": 977, "tokens_out": 61, "cache_hit": false}, {"ts": 2.8447, "kind": "run_end", "stop_reason": "final", "steps": 2, "total_time": 2.8447, "answer": "FINAL: 最近 200 帧检测质量：检出率 90.6%，平均每帧目标数 2.2，定位抖动 0.81 px。latest 片段可视化报告已渲染完成（100 帧），保存路径为 `reports/latest.png`。"}]}, {"label": "固定快档 · qwen2.5:7b", "group": "baseline", "strategy": "固定快档 · 不感知预算", "budget": null, "total": 5.621, "stop_reason": "no_final", "steps": 2, "answer": "最近200帧的检测质量统计如下：\n- 检出率为 90.6%\n- 平均每帧检测目标数为 2.2 个\n- 定位抖动为 0.81 像素\n\n最新片段的检测可视化报告已生成，保存路径为 `reports/latest.png`。", "expected": "需含 reports/latest.png 与检出率值", "correct": true, "on_time": true, "wrap_up": false, "compress": false, "events": [{"ts": 0.0, "kind": "run_start", "task": "检查最近 200 帧的检测质量，并渲染 latest 片段的可视化报告。报告保存路径是什么？", "deadline": null, "model": "qwen2.5:7b", "max_steps": 8}, {"ts": 1.9797, "kind": "llm_call", "step": 1, "model": "qwen2.5:7b", "ttft": 1.0187, "total": 1.9795, "tokens_in": 647, "tokens_out": 44, "cache_hit": false}, {"ts": 2.5807, "kind": "tool_call", "tool": "detection_stats", "duration": 0.6004, "status": "ok", "batch": "c94927e9"}, {"ts": 3.4808, "kind": "tool_call", "tool": "render_report", "duration": 1.5001, "status": "ok", "batch": "c94927e9"}, {"ts": 5.621, "kind": "llm_call", "step": 2, "model": "qwen2.5:7b", "ttft": 0.1693, "total": 2.1396, "tokens_in": 778, "tokens_out": 76, "cache_hit": false}, {"ts": 5.621, "kind": "run_end", "stop_reason": "no_final", "steps": 2, "total_time": 5.621, "answer": "最近200帧的检测质量统计如下：\n- 检出率为 90.6%\n- 平均每帧检测目标数为 2.2 个\n- 定位抖动为 0.81 像素\n\n最新片段的检测可视化报告已生成，保存路径为 `reports/latest.png`。"}]}, {"label": "固定强档 · deepseek-chat", "group": "baseline", "strategy": "固定强档 · 不感知预算", "budget": null, "total": 2.909, "stop_reason": "final", "steps": 2, "answer": "FINAL: 最近 200 帧检测质量：检出率 90.6%，平均每帧目标数 2.2，定位抖动 0.81 px。latest 片段可视化报告已渲染完成，保存路径为 `reports/latest.png`（共渲染 100 帧）。", "expected": "需含 reports/latest.png 与检出率值", "correct": true, "on_time": true, "wrap_up": false, "compress": false, "events": [{"ts": 0.0, "kind": "run_start", "task": "检查最近 200 帧的检测质量，并渲染 latest 片段的可视化报告。报告保存路径是什么？", "deadline": null, "model": "deepseek-chat", "max_steps": 8}, {"ts": 0.6674, "kind": "llm_call", "step": 1, "model": "deepseek-chat", "ttft": 0.3894, "total": 0.6672, "tokens_in": 807, "tokens_out": 90, "cache_hit": false}, {"ts": 1.2683, "kind": "tool_call", "tool": "detection_stats", "duration": 0.6005, "status": "ok", "batch": "c5f89c56"}, {"ts": 2.1685, "kind": "tool_call", "tool": "render_report", "duration": 1.5005, "status": "ok", "batch": "c5f89c56"}, {"ts": 2.909, "kind": "llm_call", "step": 2, "model": "deepseek-chat", "ttft": 0.4668, "total": 0.7397, "tokens_in": 977, "tokens_out": 64, "cache_hit": false}, {"ts": 2.909, "kind": "run_end", "stop_reason": "final", "steps": 2, "total_time": 2.909, "answer": "FINAL: 最近 200 帧检测质量：检出率 90.6%，平均每帧目标数 2.2，定位抖动 0.81 px。latest 片段可视化报告已渲染完成，保存路径为 `reports/latest.png`（共渲染 100 帧）。"}]}]}</script>
+<script>
+(function(){
+  var el = document.getElementById('demo-data');
+  var DATA;
+  try { DATA = JSON.parse(el.textContent); }
+  catch(e){
+    document.querySelector('.wrap').innerHTML =
+      '<div class="err">演示数据尚未生成。请在项目根目录运行：<br>python eval/make_demo.py</div>';
+    return;
+  }
+
+  document.getElementById('tasktext').textContent = DATA.task;
+  document.getElementById('taskneed').innerHTML =
+    '判分点（规则判分，不需要模型自评）：' + DATA.expected;
+
+  var runs = DATA.runs;
+  var cur = null, clock = 0, playing = false, speed = 1, lastTs = 0, raf = null;
+
+  /* ---------- 通用工具 ---------- */
+  function fmt(x, n){ return (x===null||x===undefined||isNaN(x)) ? '—' : x.toFixed(n===undefined?2:n); }
+  function tierOf(model){
+    if(!model) return null;
+    if(model.indexOf('deepseek') >= 0) return 'strong';
+    return 'fast';
+  }
+  function tierName(t){ return t==='strong' ? '强档' : (t==='fast' ? '快档' : '—'); }
+  function modelShort(model){
+    if(!model) return '';
+    if(model.indexOf('deepseek') >= 0) return 'deepseek-chat';
+    return model;
+  }
+  /* 区间着色：串行调用复用同一行，重叠调用自动分配到不同行 */
+  function pack(items){
+    var ends = [], assign = [];
+    items.forEach(function(it){
+      var put = -1;
+      for(var i=0;i<ends.length;i++){ if(ends[i] <= it.s + 1e-6){ ends[i] = it.e; put = i; break; } }
+      if(put < 0){ ends.push(it.e); put = ends.length-1; }
+      assign.push(put);
+    });
+    return {rows: Math.max(ends.length,1), assign: assign};
+  }
+
+  /* ---------- 构造时间轴 ---------- */
+  function buildTimeline(run){
+    var ev = run.events || [];
+    var deadline = run.budget;
+    var total = run.total;
+    // 右侧留出余量，供末尾条形的标签摆放
+    var xmax = Math.max(deadline || 0, total || 0) * 1.16;
+
+    var llm = [], tools = [], marks = [];
+    ev.forEach(function(e){
+      if(e.kind === 'llm_call'){
+        llm.push({s: e.ts - e.total, e: e.ts, ttft: e.ttft, model: e.model,
+                  step: e.step, tokens_out: e.tokens_out, tokens_in: e.tokens_in});
+      } else if(e.kind === 'tool_call'){
+        tools.push({s: e.ts - e.duration, e: e.ts, tool: e.tool, dur: e.duration,
+                    batch: e.batch || null, status: e.status});
+      } else if(e.kind === 'wrap_up'){
+        marks.push({ts: e.ts, cls:'wrap', label:'收尾触发 · 剩余 ' + fmt(e.remaining) + 's'});
+      } else if(e.kind === 'compress'){
+        marks.push({ts: e.ts, cls:'cmp', label:'上下文压缩 · ' + e.strategy});
+      }
+    });
+    llm.sort(function(a,b){ return a.s - b.s; });
+    tools.sort(function(a,b){ return a.s - b.s; });
+    marks.sort(function(a,b){ return a.ts - b.ts; });
+
+    var lp = pack(llm), tp = pack(tools);
+
+    var lanes = document.getElementById('lanes');
+    lanes.innerHTML = '';
+    // 秒网格线（放在 track 内的背景层，复用一条绝对定位容器由 CSS 渲染）
+    function addLane(name, html, height){
+      var lane = document.createElement('div');
+      lane.className = 'lane';
+      lane.innerHTML = '<div class="name">' + name + '</div>' +
+                       '<div class="track" style="min-height:' + height + 'px">' +
+                       '<div class="grid">' + gridHTML(xmax) + '</div>' + html + '</div>';
+      lanes.appendChild(lane);
+      return lane;
+    }
+    function pct(t){ return Math.max(0, t / xmax * 100); }
+    function gridHTML(xm){
+      var stepS = xm > 12 ? 5 : (xm > 6 ? 1 : 0.5);
+      var s = '';
+      for(var t = 0; t <= xm + 1e-9; t += stepS){ s += '<i style="left:' + pct(t) + '%"></i>'; }
+      return s;
+    }
+
+    // 模型调用车道（条与标签分层：条再窄，标签也不会被裁）
+    var lh = lp.rows * 29 + 3;
+    var lhtml = '', llab = '';
+    llm.forEach(function(c, i){
+      var t = tierOf(c.model);
+      var w = pct(c.e - c.s), tt = c.ttft ? pct(c.ttft) : 0;
+      var top = lp.assign[i] * 29;
+      lhtml += '<div class="row" style="top:' + top + 'px;position:absolute;left:0;right:0">' +
+        '<div class="bar llm-' + t + '" data-s="' + c.s + '" data-e="' + c.e + '" ' +
+        'title="' + modelShort(c.model) + ' · TTFT ' + fmt(c.ttft) + 's · 本次调用 ' +
+        fmt(c.e - c.s) + 's · 输出 ' + (c.tokens_out || 0) + ' tokens" ' +
+        'style="left:' + pct(c.s) + '%;width:' + w + '%">' +
+        '<div class="clip"><div class="fill"></div>' +
+        '<div class="ttft" style="width:' + (w ? tt / w * 100 : 0) + '%"></div></div></div></div>';
+      llab += '<div class="barlab llm-' + t + '" data-s="' + c.s + '" data-e="' + c.e + '" ' +
+        'style="left:' + pct(c.e) + '%;top:' + (top + 4) + 'px">' +
+        tierName(t) + ' TTFT ' + fmt(c.ttft) + 's</div>';
+    });
+    var lane1 = addLane('模型调用', lhtml + llab, lh);
+    lane1.querySelector('.track').style.height = lh + 'px';
+
+    // 工具调用车道（顶部 28px 留给并行批括号）
+    var BH = 28;
+    var th = BH + tp.rows * 29 + 3;
+    var thtml = '', tlab = '';
+    tools.forEach(function(c, i){
+      var top = BH + tp.assign[i] * 29;
+      thtml += '<div class="row" style="top:' + top + 'px;position:absolute;left:0;right:0">' +
+        '<div class="bar tool" data-s="' + c.s + '" data-e="' + c.e + '" ' +
+        'title="' + c.tool + ' · 耗时 ' + fmt(c.dur) + 's' +
+        (c.batch ? ' · 并行批 ' + c.batch : '') + '" ' +
+        'style="left:' + pct(c.s) + '%;width:' + pct(c.e - c.s) + '%">' +
+        '<div class="clip"><div class="fill"></div></div></div></div>';
+      tlab += '<div class="barlab tool" data-s="' + c.s + '" data-e="' + c.e + '" ' +
+        'style="left:' + pct(c.e) + '%;top:' + (top + 4) + 'px">' +
+        c.tool + ' ' + fmt(c.dur) + 's</div>';
+    });
+    // 并行批括号：同一 batch id 且含多于 1 个工具
+    var groups = {};
+    tools.forEach(function(c, i){ if(c.batch){ (groups[c.batch] = groups[c.batch] || []).push(i); } });
+    Object.keys(groups).forEach(function(k){
+      var idx = groups[k];
+      if(idx.length < 2) return;
+      var s = Math.min.apply(null, idx.map(function(i){ return tools[i].s; }));
+      var e = Math.max.apply(null, idx.map(function(i){ return tools[i].e; }));
+      var serial = idx.reduce(function(a, i){ return a + tools[i].dur; }, 0);
+      var save = serial > 0 ? Math.round((1 - (e - s) / serial) * 100) : 0;
+      thtml += '<div class="batchb" data-s="' + s + '" style="left:' + pct(s) + '%;width:' +
+        pct(e - s) + '%"><span class="l">并行批 · 墙钟比串行省 ' + save + '%</span></div>';
+    });
+    var lane2 = addLane('工具调用', thtml + tlab, th);
+    lane2.querySelector('.track').style.height = th + 'px';
+
+    // 事件车道
+    var ehtml = '';
+    marks.forEach(function(m){
+      ehtml += '<div class="evt ' + m.cls + '" data-ts="' + m.ts + '" style="left:' + pct(m.ts) + '%;top:3px">' +
+        m.label + '</div>';
+    });
+    addLane('事件', ehtml, 28);
+
+    // 预算线 + 超支区 + 播放头（贯穿所有车道）
+    var old = lanes.querySelectorAll('.deadline,.overband,.playhead');
+    for(var i=0;i<old.length;i++){ old[i].remove(); }
+
+    if(deadline !== null && deadline !== undefined){
+      var band = document.createElement('div');
+      band.className = 'overband';
+      band.dataset.pct = pct(deadline);
+      lanes.appendChild(band);
+
+      var dl = document.createElement('div');
+      dl.className = 'deadline';
+      dl.dataset.pct = pct(deadline);
+      dl.innerHTML = '<span class="tag' + (pct(deadline) > 82 ? ' left' : '') +
+                     '">预算 ' + deadline + 's</span>';
+      lanes.appendChild(dl);
+    }
+    var ph = document.createElement('div');
+    ph.className = 'playhead';
+    ph.id = 'playhead';
+    ph.innerHTML = '<span class="t" id="pht">0.00s</span>';
+    lanes.appendChild(ph);
+
+    XMAX = xmax;
+    layout();
+  }
+
+  /* 百分比 → 像素：.lanes 有内边距，需换算到轨道实际范围 */
+  var XMAX = 1;
+  function trackBox(){
+    var lanes = document.getElementById('lanes');
+    var track = lanes.querySelector('.track');
+    if(!track) return null;
+    var tr = track.getBoundingClientRect(), lr = lanes.getBoundingClientRect();
+    return {off: tr.left - lr.left, w: tr.width};
+  }
+  function layout(){
+    var b = trackBox();
+    if(!b) return;
+    var hit = document.getElementById('lanes').querySelectorAll('.deadline,.overband');
+    for(var i=0;i<hit.length;i++){
+      hit[i].style.left = (b.off + b.w * parseFloat(hit[i].dataset.pct) / 100) + 'px';
+    }
+  }
+  window.addEventListener('resize', function(){ if(cur){ layout(); positionPlayhead(); } });
+
+  function positionPlayhead(){
+    var ph = document.getElementById('playhead'), box = trackBox();
+    if(ph && box){ ph.style.left = (box.off + box.w * Math.min(clock / XMAX, 1)) + 'px'; }
+  }
+
+  /* ---------- 回放渲染 ---------- */
+  function render(){
+    var lanes = document.getElementById('lanes');
+    var bars = lanes.querySelectorAll('.bar, .barlab');
+    for(var i=0;i<bars.length;i++){
+      var b = bars[i], s = parseFloat(b.dataset.s);
+      if(clock > s) b.classList.add('show'); else b.classList.remove('show');
+    }
+    var bbs = lanes.querySelectorAll('.batchb');
+    for(var k=0;k<bbs.length;k++){
+      var bb = bbs[k], bs = parseFloat(bb.dataset.s);
+      if(clock >= bs) bb.classList.add('show'); else bb.classList.remove('show');
+    }
+    var evs = lanes.querySelectorAll('.evt');
+    for(var m=0;m<evs.length;m++){
+      var ev = evs[m], ts = parseFloat(ev.dataset.ts);
+      if(clock >= ts) ev.classList.add('show'); else ev.classList.remove('show');
+    }
+    positionPlayhead();
+    var pht = document.getElementById('pht');
+    if(pht) pht.textContent = clock.toFixed(2) + 's';
+
+    // HUD
+    var rem = cur.budget !== null ? cur.budget - clock : null;
+    var hr = document.getElementById('h-remain');
+    if(rem !== null){
+      hr.textContent = (rem >= 0 ? '' : '−') + Math.abs(rem).toFixed(2) + 's';
+      hr.className = 'v' + (rem < 0 ? ' over' : '');
+    } else {
+      hr.textContent = '不限'; hr.className = 'v small';
+    }
+    var active = null, steps = 0, tok = 0;
+    (cur.events || []).forEach(function(e){
+      if(e.kind === 'llm_call'){
+        if(clock >= e.ts - e.total) active = e.model;
+        if(clock >= e.ts){ steps++; tok += (e.tokens_out || 0); }
+      }
+    });
+    var ht = document.getElementById('h-tier');
+    var t = tierOf(active);
+    ht.textContent = active ? tierName(t) : '—';
+    ht.className = 'v small' + (t === 'strong' ? ' strong' : (t === 'fast' ? ' fast' : ''));
+    document.getElementById('h-steps').textContent = steps;
+    document.getElementById('h-tok').textContent = tok;
+  }
+
+  function stop(){ playing = false; if(raf) cancelAnimationFrame(raf); raf = null;
+    document.getElementById('btn-play').textContent = '重播'; }
+
+  function pause(){ playing = false; if(raf) cancelAnimationFrame(raf); raf = null;
+    document.getElementById('btn-play').textContent = '继续'; }
+
+  function resume(){ playing = true; lastTs = performance.now();
+    document.getElementById('btn-play').textContent = '暂停';
+    raf = requestAnimationFrame(tick); }
+
+  function tick(ts){
+    if(!playing) return;
+    var dt = (ts - lastTs) / 1000; lastTs = ts;
+    clock += dt * speed;
+    if(clock >= cur.total){ clock = cur.total; render(); showResult(); stop(); return; }
+    render();
+    raf = requestAnimationFrame(tick);
+  }
+
+  function play(){
+    stop(); clock = 0; render(); hideResult();
+    playing = true; lastTs = performance.now();
+    document.getElementById('btn-play').textContent = '暂停';
+    raf = requestAnimationFrame(tick);
+  }
+
+  /* ---------- 结果 ---------- */
+  function hideResult(){ document.getElementById('result').classList.remove('show'); }
+  function showResult(){
+    var r = document.getElementById('result');
+    var onTime = cur.on_time, correct = cur.correct;
+    var html = '';
+    if(cur.budget !== null){
+      html += onTime
+        ? '<span class="badge ok">✓ 按时 ' + fmt(cur.total) + 's / 预算 ' + cur.budget + 's</span>'
+        : '<span class="badge bad">✕ 迟到 ' + fmt(cur.total) + 's / 预算 ' + cur.budget + 's</span>';
+    } else {
+      html += '<span class="badge info">不限预算 · ' + fmt(cur.total) + 's</span>';
+    }
+    html += correct
+      ? '<span class="badge ok">判分通过</span>'
+      : '<span class="badge bad">判分未通过</span>';
+    html += '<span class="badge info">' + cur.strategy + '</span>';
+    if(cur.wrap_up) html += '<span class="badge warn">收尾模式已触发</span>';
+    if(cur.compress) html += '<span class="badge info">上下文压缩已触发</span>';
+    html += '<span style="font-size:12.5px;color:var(--text-muted);font-family:var(--mono)">' +
+            'stop_reason=' + cur.stop_reason + ' · steps=' + cur.steps + '</span>';
+    document.getElementById('res-head').innerHTML = html;
+
+    var a = document.getElementById('res-ans');
+    a.textContent = cur.answer || '（空）';
+    a.className = 'ans' + (correct ? '' : ' cut');
+    document.getElementById('res-meta').textContent =
+      '判分要求：' + cur.expected + (correct ? '  → 满足' : '  → 未满足（见上：答案被预算截断或缺失关键数值）');
+    r.classList.add('show');
+  }
+
+  /* ---------- 对比条 ---------- */
+  function buildCmp(){
+    var body = document.getElementById('cmp-body');
+    var maxT = Math.max.apply(null, runs.map(function(r){ return Math.max(r.total, r.budget||0); })) * 1.06;
+    body.innerHTML = '';
+    runs.forEach(function(r, i){
+      var line = document.createElement('div');
+      line.className = 'line';
+      var pct = r.total / maxT * 100;
+      var cls = (r.correct && r.on_time) ? 'ok' : 'bad';
+      var dl = r.budget !== null ? (r.budget / maxT * 100) : null;
+      line.innerHTML =
+        '<div class="nm">' + r.label + '</div>' +
+        '<div class="track2"><div class="b ' + cls + '" style="width:' + pct + '%"></div>' +
+        (dl !== null ? '<div class="mark" style="left:' + dl + '%"></div>' : '') + '</div>' +
+        '<div class="tt">' + fmt(r.total) + 's' + (r.budget!==null ? ' / ' + r.budget + 's' : '') + '</div>';
+      line.onclick = function(){ select(i); };
+      body.appendChild(line);
+    });
+    var axis = document.createElement('div');
+    axis.className = 'axis';
+    axis.innerHTML = '<div></div><div style="display:flex;justify-content:space-between">' +
+                     '<span>0s</span><span>' + fmt(maxT, 1) + 's</span></div><div></div>';
+    body.appendChild(axis);
+  }
+
+  /* ---------- 选择器 ---------- */
+  function buildPicker(){
+    var p = document.getElementById('picker');
+    p.innerHTML = '';
+    var groups = [
+      {name:'DeRT 调度', items: runs.map(function(r,i){ return {r:r,i:i}; })
+          .filter(function(x){ return x.r.group === 'dert'; })},
+      {name:'固定基线', items: runs.map(function(r,i){ return {r:r,i:i}; })
+          .filter(function(x){ return x.r.group === 'baseline'; })}
+    ];
+    groups.forEach(function(g){
+      if(!g.items.length) return;
+      var lab = document.createElement('span');
+      lab.className = 'grp'; lab.textContent = g.name;
+      p.appendChild(lab);
+      g.items.forEach(function(x){
+        var b = document.createElement('button');
+        b.className = 'run'; b.dataset.i = x.i;
+        var ok = x.r.correct && x.r.on_time;
+        var dot = ok ? 'ok' : (x.r.on_time || x.r.correct ? 'warn' : 'bad');
+        b.innerHTML = '<span class="dot ' + dot + '"></span>' + x.r.label;
+        b.onclick = function(){ select(x.i); };
+        p.appendChild(b);
+      });
+    });
+  }
+
+  function select(i){
+    cur = runs[i];
+    Array.prototype.forEach.call(document.querySelectorAll('button.run'), function(b){
+      b.classList.toggle('on', parseInt(b.dataset.i, 10) === i);
+    });
+    buildTimeline(cur);
+    play();
+  }
+
+  /* ---------- 控制条 ---------- */
+  var btnPlay = document.getElementById('btn-play');
+  btnPlay.onclick = function(){
+    if(playing){ pause(); return; }                 // 播放中 → 暂停
+    if(clock > 0 && clock < cur.total){ resume(); return; }  // 暂停中 → 继续
+    play();                                          // 已播完 → 重播
+  };
+  Array.prototype.forEach.call(document.querySelectorAll('#speed button'), function(b){
+    b.onclick = function(){
+      speed = parseFloat(b.dataset.s);
+      Array.prototype.forEach.call(document.querySelectorAll('#speed button'), function(x){
+        x.classList.toggle('on', x === b);
+      });
+    };
+  });
+
+  buildPicker();
+  buildCmp();
+  select(0);
+})();
+</script>
+</body>
+</html>

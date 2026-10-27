@@ -1,0 +1,32 @@
+# DeRT v3emp 依赖清单（Python >= 3.11）
+# 分层：核心运行时 → 服务化 → 公共基准（BFCL/HB）→ 评估绘图 → 开发测试
+
+# ---- 核心运行时 ----
+openai>=1.40            # OpenAI 兼容 API 客户端（Ollama / 阿里云百炼共用）
+
+# ---- 服务化（service/）----
+fastapi>=0.110
+uvicorn>=0.29
+pydantic>=2.6
+mcp>=1.2                # MCP server 形态（service/mcp_server.py）
+
+# ---- Agent 内置工具（src/tools.py 的检索/抓取工具）----
+requests>=2.31
+beautifulsoup4>=4.12
+html2text>=2024.2.26
+numpy>=1.26
+rank_bm25>=0.2.2        # BM25 检索工具
+
+# ---- 公共基准（eval/，只跑评估时装）----
+# BFCL 依赖 vendored 在 eval/bfcl/ 下，其 func_source 还会用到：
+sentence-transformers>=2.7   # memory_vector 工具（懒加载，不用可跳过）
+faiss-cpu>=1.8               # 同上
+overrides>=7.4               # BFCL metaclass 装饰器
+# serpapi>=1.0             # web_search 工具需要 SERPAPI_KEY，默认跳过该类目
+# huggingface_hub          # HammerBench 数据集下载（用 hf-mirror 时 pip 自动带）
+
+# ---- 评估绘图（eval/plot_*.py，独立脚本）----
+matplotlib>=3.8
+
+# ---- 开发/测试 ----
+pytest>=8.0

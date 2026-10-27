@@ -1,0 +1,44 @@
+# DeRT .gitignore
+# 安全红线：任何 API 密钥只允许存在于用户级环境变量（DEEPSEEK_API_KEY），
+# 永远不允许写入项目内任何文件。上传/公开仓库前请执行 README「上传前安全检查」。
+
+# Python
+__pycache__/
+*.pyc
+
+# 评估产物（体积大，且开发期缓存含大量模型响应，无开源价值）
+eval/cache/
+eval/traces/
+
+# 本机杂项
+Thumbs.db
+.DS_Store
+.pytest_cache/
+
+# ===== 安全红线：任何密钥文件永不入库 =====
+*.key
+*.pem
+.env
+.env.*
+
+# ===== 评估产物与公开数据集（体积大，无开源价值）=====
+eval/results/
+eval/bfcl/
+eval/hammerbench/
+*.log
+eval/__pycache__/
+
+# 运行时状态（每次请求一个目录）
+service/state/
+
+# 归档旧实现
+_attic/
+
+# WorkBuddy 内部记忆（会话记录与决策日志）
+.workbuddy/
+
+# ===== 内部材料（简历、求职调研、教学页），不属于开源仓库 =====
+docs/DeRT-简历与面试.md
+docs/DeRT简历交接文档-20260909.md
+docs/人才市场调研-20260823.md
+docs/教学-DeRT全景-20260824.html

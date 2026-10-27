@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeRT：时间作为一等公民的 Agent 运行时</title>
+<style>
+  :root {
+    --ink: #26282c; --muted: #6b6f76; --line: #e3e4e8;
+    --accent: #185fa5; --accent-soft: #e6f1fb;
+    --bg: #ffffff; --panel: #f7f8fa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.95 -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  }
+  .page { max-width: 880px; margin: 0 auto; padding: 56px 28px 80px; }
+  header.hero { border-bottom: 3px solid var(--ink); padding-bottom: 28px; margin-bottom: 34px; }
+  .kicker { font-size: 13px; letter-spacing: .14em; color: var(--accent); margin-bottom: 10px; }
+  h1 { font-size: 30px; line-height: 1.35; margin: 0 0 10px; font-weight: 600; }
+  .subtitle { font-size: 16px; color: var(--muted); margin: 0 0 18px; }
+  .position {
+    background: var(--accent-soft); border-left: 4px solid var(--accent);
+    padding: 14px 18px; border-radius: 0 8px 8px 0; font-size: 15px;
+  }
+  h2 {
+    font-size: 21px; margin: 52px 0 6px; font-weight: 600;
+    padding-left: 14px; border-left: 5px solid var(--accent);
+  }
+  h3 { font-size: 16.5px; margin: 30px 0 4px; font-weight: 600; }
+  p { margin: 10px 0; text-align: justify; }
+  .transition {
+    color: var(--muted); font-size: 14px; margin-top: 18px;
+    padding-top: 12px; border-top: 1px dashed var(--line);
+  }
+  .abstract {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 20px 24px; margin: 0 0 8px;
+  }
+  .abstract .label { font-weight: 600; color: var(--accent); font-size: 13px; letter-spacing: .12em; }
+  .meta-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .chip {
+    font-size: 12.5px; color: var(--muted); border: 1px solid var(--line);
+    border-radius: 999px; padding: 3px 12px; background: #fff;
+  }
+  .sellpoint {
+    display: inline-block; background: var(--accent); color: #fff;
+    font-size: 12.5px; letter-spacing: .1em; border-radius: 4px;
+    padding: 2px 10px; margin-bottom: 4px; vertical-align: middle;
+  }
+  .sellpoint.core { background: #993C1D; }
+  figure { margin: 26px 0; text-align: center; }
+  figure img { max-width: 100%; border: 1px solid var(--line); border-radius: 8px; }
+  figcaption { font-size: 13px; color: var(--muted); margin-top: 8px; line-height: 1.7; text-align: left; }
+  figcaption b { color: var(--ink); }
+  table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 9px 13px; text-align: left; vertical-align: top; }
+  th { background: var(--panel); font-weight: 600; white-space: nowrap; }
+  td .num { color: var(--accent); font-weight: 600; }
+  .trio { display: flex; gap: 14px; flex-wrap: wrap; margin: 20px 0; }
+  .trio .card {
+    flex: 1 1 220px; border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px;
+    border-top: 4px solid var(--accent); background: #fbfdff;
+  }
+  .trio h4 { margin: 0 0 6px; font-size: 15px; }
+  .trio p { margin: 0; font-size: 13.5px; color: var(--muted); }
+  .layer-list { padding-left: 0; list-style: none; }
+  .layer-list > li { margin: 14px 0; padding-left: 14px; border-left: 3px solid var(--line); }
+  .layer-list b { color: var(--accent); }
+  .tradeoff-note { color: var(--muted); font-size: 13.5px; }
+  footer {
+    margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--muted);
+  }
+  @media print {
+    .page { padding: 0; } body { font-size: 13px; }
+    h2 { break-after: avoid; } figure, table { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="hero">
+  <div class="kicker">PROJECT · LLM AGENT RUNTIME</div>
+  <h1>DeRT：时间作为一等公民的 Agent 运行时</h1>
+  <p class="subtitle">Deadline-aware Runtime for Tool-agents · 四时钟检查点 · 判卷驱动级联</p>
+  <div class="position">
+    <b>核心卖点：</b>把时间约束当作一等公民建模——时间不是开工前的一次性分配，
+    而是贯穿任务全程的连续决策（四个时钟检查点）。
+    由此兑现两件事：重复任务越用越省，新任务靠难度信号泛化。
+  </div>
+  <div class="meta-chips">
+    <span class="chip">四时钟检查点</span>
+    <span class="chip">快慢双档级联</span>
+    <span class="chip">本地判卷 = 交付条件</span>
+    <span class="chip">影子流量难度史</span>
+    <span class="chip">35 项离线测试</span>
+    <span class="chip">FastAPI · SSE · MCP</span>
+  </div>
+</header>
+
+<section class="abstract">
+  <span class="label">摘 要</span>
+  <p>
+    Agent 的每个任务都带有隐含的时间约束：用户在等，成本在烧，而一个任务由多次模型调用构成、
+    模型档位价差数倍。现有框架对时间的处理停留在「超时中断」——事后补救而非事中决策。
+    DeRT 的核心主张是<b>把时间作为一等公民</b>：调度器在任务全程设置四个时钟检查点
+    （首步选档、收尾触发、判卷门、升级门），时间从一次性分配变为贯穿全程的连续决策；
+    且用户永远不需要输入时间——deadline 是交付条件的影子。在这一核心之上，
+    系统兑现两个效果：<b>重复任务</b>经影子难度记忆首轮廉价试错、此后直达正确档位，
+    第二轮即收敛至强档水平；<b>未见过的任务</b>靠难度信号路由，并把时间约束泛化为成本等
+    一般化资源量纲——典型预算下以约三分之一成本达到与全程强档相当的成功率。
+    全部结论来自离线受控实验，经配对显著性检验。
+  </p>
+</section>
+
+<!-- ================================================================ -->
+<h2>1 引入：时间约束下的选档困境</h2>
+
+<h3>1.1 每个任务都有隐性时间预算</h3>
+<p>
+  Agent 与聊天机器人的本质区别在于：<b>一个任务 = 多次模型调用</b>——规划、调工具、读结果、再决策，
+  典型流程五到十次起步。与此同时，每个任务都背着隐性预算：交互场景里用户在等，
+  批处理场景里成本在烧。模型档位之间价差数倍，「这个任务用哪个模型」不是实现细节，
+  而是直接决定体验与毛利的<b>运行时决策</b>。
+</p>
+
+<h3>1.2 两难：强模型准而慢贵，弱模型快省而不可靠</h3>
+<p>
+  时间约束把选档变成一道两难题。全用强模型，多数任务在白花钱，且慢；
+  全用弱模型，关键任务直接翻车。本项目实测给出结构性数字：
+  <b>仅约四分之一的任务真正需要强模型</b>——一刀切在两头都是坏答案。
+</p>
+
+<h3>1.3 硬缺口：现有框架对时间只有「事后中断」</h3>
+<p>
+  给定时间里强模型赶不赶得完，无法先验判断；训练路由器要标注数据，
+  固定阈值怕漂移（本项目实证过延迟漂移导致整档路由失效）。
+  而更普遍的现状是：主流 Agent 框架对时间根本<b>不做决策</b>——只在超时后粗暴中断，
+  白白烧掉的调用没有任何回收。DeRT 认为时间值得被当成一等公民：
+  在任务全程持续做时间决策，而不是在终点设一道墙。
+</p>
+
+<p class="transition">「把时间当一等公民」具体是什么意思？——四个时钟检查点。</p>
+
+<!-- ================================================================ -->
+<h2><span class="sellpoint core">核心卖点</span>&nbsp;时间是一等公民：贯穿全程的四个时钟检查点</h2>
+
+<figure>
+<svg viewBox="0 0 680 300" width="100%" role="img" xmlns="http://www.w3.org/2000/svg" style="background:#fff">
+  <title>DeRT 四时钟检查点：时间贯穿任务全程</title>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5"
+      markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke"
+        stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <text x="340" y="34" text-anchor="middle" font-size="13" fill="#6b6f76">时间从「开工前一次性分配」变为「贯穿全程的连续决策」</text>
+  <path d="M50 150 L630 150" fill="none" stroke="#26282c" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="636" y="154" dominant-baseline="central" font-size="13" fill="#26282c">t</text>
+
+  <g>
+    <circle cx="120" cy="150" r="13" fill="#E6F1FB" stroke="#185FA5" stroke-width="1.5"/>
+    <text x="120" y="151" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="500" fill="#0C447C">1</text>
+    <text x="120" y="118" text-anchor="middle" font-size="13.5" font-weight="500" fill="#0C447C">首步选档</text>
+    <text x="120" y="100" text-anchor="middle" font-size="12" fill="#6b6f76">按剩余预算走档位阶梯</text>
+  </g>
+  <g>
+    <circle cx="270" cy="150" r="13" fill="#FAEEDA" stroke="#854F0B" stroke-width="1.5"/>
+    <text x="270" y="151" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="500" fill="#633806">2</text>
+    <text x="270" y="118" text-anchor="middle" font-size="13.5" font-weight="500" fill="#633806">收尾触发</text>
+    <text x="270" y="100" text-anchor="middle" font-size="12" fill="#6b6f76">时间将尽 → 停止探索、交草稿</text>
+  </g>
+  <g>
+    <circle cx="430" cy="150" r="13" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.5"/>
+    <text x="430" y="151" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="500" fill="#085041">3</text>
+    <text x="430" y="118" text-anchor="middle" font-size="13.5" font-weight="500" fill="#085041">判卷门</text>
+    <text x="430" y="100" text-anchor="middle" font-size="12" fill="#6b6f76">剩余时间够判卷才判卷</text>
+  </g>
+  <g>
+    <circle cx="570" cy="150" r="13" fill="#FAECE7" stroke="#993C1D" stroke-width="1.5"/>
+    <text x="570" y="151" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="500" fill="#712B13">4</text>
+    <text x="570" y="118" text-anchor="middle" font-size="13.5" font-weight="500" fill="#712B13">升级门</text>
+    <text x="570" y="100" text-anchor="middle" font-size="12" fill="#6b6f76">强档来得及才升级</text>
+  </g>
+
+  <text x="120" y="188" text-anchor="middle" font-size="12" fill="#6b6f76">开工前</text>
+  <text x="350" y="188" text-anchor="middle" font-size="12" fill="#6b6f76">执行中（快档探索 / 判卷 / 强档重答）</text>
+  <text x="620" y="188" text-anchor="end" font-size="12" fill="#6b6f76">交付</text>
+
+  <g>
+    <rect x="90" y="228" width="500" height="52" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
+    <text x="340" y="248" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="500" fill="#3C3489">用户永远不需要输入时间</text>
+    <text x="340" y="266" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#534AB7">判卷通过即交付条件，deadline 是它的影子——时间智能藏在运行时里</text>
+  </g>
+</svg>
+<figcaption><b>图 1 · 四时钟检查点。</b>
+同一个「剩余预算」在任务的不同阶段被反复定价四次：开工前决定走哪档、执行中决定何时收尾、
+答完后决定判不判卷、升级前决定来不来得及。每一次都是用当前信息买的期权，
+而不是开工前拍死的一个数字。紧预算下收尾触发会强制交出草稿——超时不是损失，是止损。</figcaption>
+</figure>
+
+<p>
+  这与主流框架的差异是结构性的：它们的超时是<b>终点上的一道墙</b>，撞上去之前对时间无感知；
+  DeRT 的四个检查点让模型调用变成<b>可随时止盈止损的期权</b>——每一秒都在被重新定价。
+  这是本项目与现有工作最本质的差异，也是项目名 Deadline-aware 的由来。
+</p>
+
+<p class="transition">这一核心机制在两类场景上各兑现出一个效果。先看时间省在哪里——重复任务。</p>
+
+<!-- ================================================================ -->
+<h2><span class="sellpoint">兑现一</span>&nbsp;重复类似任务：又快、又准、又省</h2>
+
+<p>
+  真实部署中的 Agent 负载高度重复——客服、运维、办公场景的同类任务反复出现。
+  时间最贵的浪费之一，是对同一个任务反复试错。DeRT 让「第一次试错」变成一次性学费：
+  此后所有同类任务直达正确档位。
+</p>
+
+<figure>
+<svg viewBox="0 0 680 356" width="100%" role="img" xmlns="http://www.w3.org/2000/svg" style="background:#fff">
+  <title>DeRT 一次任务的旅程</title>
+  <defs>
+    <marker id="arrow2" viewBox="0 0 10 10" refX="8" refY="5"
+      markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke"
+        stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <g>
+    <rect x="40" y="40" width="130" height="56" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
+    <text x="105" y="60" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#2C2C2A">任务进入</text>
+    <text x="105" y="80" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#5F5E5A">自由文本或任务库</text>
+  </g>
+  <g>
+    <rect x="197" y="40" width="130" height="56" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+    <text x="262" y="60" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#0C447C">难度史路由</text>
+    <text x="262" y="80" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#185FA5">熟客直达对的路</text>
+  </g>
+  <g>
+    <rect x="354" y="40" width="130" height="56" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+    <text x="419" y="60" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#085041">快档先试</text>
+    <text x="419" y="80" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#0F6E56">廉价探索</text>
+  </g>
+  <g>
+    <rect x="511" y="40" width="130" height="56" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+    <text x="576" y="60" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#633806">判卷门</text>
+    <text x="576" y="80" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#854F0B">交付条件而非评分</text>
+  </g>
+  <path d="M170 68 L193 68" fill="none" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arrow2)"/>
+  <path d="M327 68 L350 68" fill="none" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arrow2)"/>
+  <path d="M484 68 L507 68" fill="none" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arrow2)"/>
+  <g>
+    <rect x="511" y="150" width="130" height="56" rx="8" fill="#FAECE7" stroke="#993C1D" stroke-width="0.5"/>
+    <text x="576" y="170" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#712B13">强档重答</text>
+    <text x="576" y="190" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#993C1D">升级门放行后</text>
+  </g>
+  <path d="M576 96 L576 146" fill="none" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arrow2)"/>
+  <text x="584" y="126" dominant-baseline="central" font-size="12" fill="#6b6f76">未过·升级</text>
+  <path d="M576 96 L576 118 L420 118 L420 236" fill="none" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arrow2)"/>
+  <text x="430" y="140" dominant-baseline="central" font-size="12" fill="#6b6f76">过·直接交付</text>
+  <g>
+    <rect x="320" y="240" width="140" height="56" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+    <text x="390" y="260" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#27500A">交付答案</text>
+    <text x="390" y="280" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#3B6D11">失败也如实说明</text>
+  </g>
+  <path d="M576 206 L576 268 L464 268" fill="none" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arrow2)"/>
+  <g>
+    <rect x="80" y="240" width="160" height="56" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
+    <text x="160" y="260" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#3C3489">影子难度史</text>
+    <text x="160" y="280" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#534AB7">流量即免费标注</text>
+  </g>
+  <path d="M316 268 L244 268" fill="none" stroke="#5F5E5A" stroke-width="1.5" marker-end="url(#arrow2)"/>
+  <text x="280" y="258" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#6b6f76">结果写回</text>
+  <path d="M160 236 L160 68 L193 68" fill="none" stroke="#B4B2A9" stroke-width="0.5" stroke-dasharray="4 4" marker-end="url(#arrow2)"/>
+  <text x="150" y="150" text-anchor="end" dominant-baseline="central" font-size="12" fill="#6b6f76">下次直达</text>
+</svg>
+<figcaption><b>图 2 · 一次任务的旅程。</b>
+首次遇到的任务由快档廉价探索，判卷门当场拦截可疑答案并升级强档；
+结果写回影子难度史——答错记难、连对记熟，同一任务下次不再走冤枉路。</figcaption>
+</figure>
+
+<div class="trio">
+  <div class="card">
+    <h4>快</h4>
+    <p>老难题不再浪费一次注定失败的快档尝试——时间不花在已知会输的地方。</p>
+  </div>
+  <div class="card">
+    <h4>准</h4>
+    <p>难客直达强档，判卷门兜底拦截可疑答案；判卷经校准，召回 96.3%，偏保守属 fail-safe 取向。</p>
+  </div>
+  <div class="card">
+    <h4>省</h4>
+    <p>熟客继续走便宜快档，判卷通过不冤枉升级——省的是「全强」里那些白花的钱。</p>
+  </div>
+</div>
+
+<p>
+  <b>效果：</b>重复任务<b>第二轮即收敛</b>至强档直答水平——冷启动的代价只是一次廉价试错
+  （几分钱的量级）。系统上线越久，单位任务的时间与成本越低。
+</p>
+
+<p class="transition">记忆只覆盖见过的任务。没见过的怎么办？——时间约束自己要泛化。</p>
+
+<!-- ================================================================ -->
+<h2><span class="sellpoint">兑现二</span>&nbsp;时间约束的泛化：难度信号与量纲推广</h2>
+
+<h3>4.1 难度感知路由：把时间花在刀刃上</h3>
+<p>
+  对首次出现的任务，用廉价的问句特征（任务类型、期望工具形态）预测「该不该请强模型」——
+  实测中快档正确性按任务类型高度集中，难任务一开始就走对路，
+  时间就不会浪费在「先失败再纠正」上。
+</p>
+
+<h3>4.2 自适应阈值：时间的估值跟着漂移走</h3>
+<p>
+  升级门的「来得及吗」依赖对强档延迟的估计。DeRT 在线维护窗口分位数 / 经验 CDF，
+  估计随模型换版、负载波动自动跟随——固定阈值对延迟漂移不稳健这一点在本项目中被实证过，
+  自适应门正是对它的回答。
+</p>
+
+<h3>4.3 量纲泛化：时间之外，还有钱</h3>
+<p>
+  时间约束只是资源约束的一种。把横轴从「时间预算」换元为「成本预算」，
+  同一套四时钟级联机制依然成立——证明它不是针对某个量纲的特殊技巧，而是通用架构。
+</p>
+
+<figure>
+  <img src="figures/generalization.png" alt="DeRT 泛用性验证双面板图">
+  <figcaption><b>图 3 · 级联模拟与量纲泛化双面板（离线受控实验，零 API 成本）。</b>
+  左：级联模拟（N=100 配对）——宽预算逼近全程强档（A），紧预算优雅退化至全快档（C），
+  30 秒档 98% ≈ A，且强档成本/对题约为 A 的三分之一；
+  右：横轴换元为成本预算——成本路由在全部档位不低于全强档，
+  更低的成本封顶即可拿到满分，强档用量恒定在约四分之一。
+  时间与金钱两种量纲，同一套机制。</figcaption>
+</figure>
+
+<p>
+  <b>效果：</b>紧预算档<b>同时反超</b>「全强」与「全弱」两种一刀切策略；
+  典型预算下以<b>约 1/3 成本</b>达到与全程强档<b>相当的成功率</b>（98% 对 99%）；
+  成本量纲下全部档位不低于全强档。
+</p>
+
+<p class="transition">核心机制与两个兑现共用同一套底座。下面给出完整构造与实验汇总。</p>
+
+<!-- ================================================================ -->
+<h2>5 系统构造与实验汇总</h2>
+
+<h3>5.1 五层底座</h3>
+<ul class="layer-list">
+  <li><b>路由层</b>——难度史记忆（后验）+ 难度信号（先验）双通道决定谁上场；
+    任务指纹用签名而非文本 embedding，因为难度藏在「快档能力」里而不在措辞里。</li>
+  <li><b>执行层</b>——快慢双档共用同一 agent 骨架，换档是运行时参数而非部署配置。</li>
+  <li><b>验证层</b>——本地小模型判卷，交付条件而非评分；接口化设计，可随时换更强的判卷员。</li>
+  <li><b>升级层</b>——升级门以在线分布估计「来得及吗」，自适应跟随漂移。</li>
+  <li><b>记忆层</b>——影子流量即免费标注；状态外置单 JSON，服务可随时重建。</li>
+</ul>
+<p>
+  兜底纪律：判卷员不可用则降级直通，服务不阻塞；强档也答不对则如实交付失败；
+  每个检查点决策均发事件（SSE），全程可审计。
+</p>
+
+<h3>5.2 实验汇总（离线受控，配对显著性检验）</h3>
+<table>
+  <tr><th>主张</th><th>兑现结果</th></tr>
+  <tr>
+    <td>核心 · 时间是一等公民</td>
+    <td>四个时钟检查点贯穿全程；紧预算收尾触发强制交草稿——超时变成止损而非损失；
+      用户无需输入时间，deadline 由交付条件隐含。</td>
+  </tr>
+  <tr>
+    <td>兑现一 · 快 / 准 / 省</td>
+    <td>重复任务第二轮收敛至强档直答水平；判卷召回 <span class="num">96.3%</span>（校准可调）；
+      熟客免试错、不冤枉升级。</td>
+  </tr>
+  <tr>
+    <td>兑现二 · 泛化</td>
+    <td>紧预算档同时反超两种一刀切；典型预算约 <span class="num">1/3 成本</span>达全程强档相当成功率
+      （98% 对 99%）；成本量纲全部档位不低于全强档。</td>
+  </tr>
+  <tr>
+    <td>工程底座</td>
+    <td>35 项离线测试全过、一键自检、32 并发压测 p95&lt;0.4s；框架自身开销约百 MB 内存——
+      消耗几乎全部在模型调用本身，调度器近乎免费。</td>
+  </tr>
+</table>
+
+<!-- ================================================================ -->
+<h2>6 设计取舍</h2>
+
+<table>
+  <tr><th>选择</th><th>放弃的替代方案</th><th>理由</th></tr>
+  <tr>
+    <td>时间做进运行时（四检查点）</td>
+    <td>超时中断 / 显式 deadline 输入</td>
+    <td>事后中断无法回收已烧掉的调用；向用户要时间则把负担转嫁给交互——交付条件自动隐含约束。</td>
+  </tr>
+  <tr>
+    <td>判卷与快档同量级小模型</td>
+    <td>独立的更强判卷模型</td>
+    <td>零额外部署、零额外成本；判卷员是接口而非实体，可随时更换更强的。</td>
+  </tr>
+  <tr>
+    <td>判卷偏保守（宁可误升级）</td>
+    <td>激进放行以省升级成本</td>
+    <td>错误代价方向安全：误判只多花小钱，漏判会交错答案。</td>
+  </tr>
+  <tr>
+    <td>任务签名做难度指纹</td>
+    <td>文本 embedding 相似度</td>
+    <td>实测发现难度藏在「快档能力」里而非措辞里，语义相似的任务难度可以完全不同。</td>
+  </tr>
+  <tr>
+    <td>状态外置为单 JSON 文件</td>
+    <td>数据库 / 向量库</td>
+    <td>无训练管道、无状态迁移；服务可随时重建，冷启动本身就是最便宜的探索方式。</td>
+  </tr>
+</table>
+
+<!-- ================================================================ -->
+<h2>7 总结与展望</h2>
+
+<p>
+  DeRT 证明了一件事：时间可以被当作 Agent 运行时的一等公民——
+  不是终点上的一道超时墙，而是全程四个检查点上的连续决策；
+  在此之上，「快档先试 — 判卷把关 — 按需升级 — 影子记忆」的闭环
+  同时拿到低成本与高质量：重复任务越用越省，新任务靠难度信号路由并泛化到成本量纲。
+</p>
+<p>
+  正在推进的方向：模型供应商更换后的路由自愈速度量化（自适应阈值对延迟漂移的跟随）；
+  面向批处理负载的成本路由态；难度签名跨措辞泛化。
+</p>
+
+<footer>
+  DeRT（Deadline-aware &amp; cost-aware Runtime for Tool-agents）· 单人完整完成：
+  问题定义、架构设计、评估体系、服务化工程与文档。
+  本页所有数字均可在项目内离线复现（配对实验 + 显著性检验脚本随项目交付）。
+</footer>
+
+</div>
+</body>
+</html>

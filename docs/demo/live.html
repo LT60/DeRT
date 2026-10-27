@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeRT 实时调度台 — 给一个预算，看调度器怎么花</title>
+<style>
+:root{
+  --bg:#fafafb; --surface:#fff; --muted-bg:#f1f1f4;
+  --text:#1a1a1e; --text-muted:#5c5c66; --border:#e4e4e9;
+  --brand:#4b3fe3; --brand-soft:#eeecff; --brand-deep:#322b9e;
+  --fast:#0b8fb5; --fast-soft:#e5f4f9;
+  --green:#0e9f6e; --green-soft:#e6f7f0;
+  --amber:#c27803; --amber-soft:#fdf3e0;
+  --red:#d0342c; --red-soft:#fdeae9;
+  --tool:#6b6b7a;
+  --mono:"JetBrains Mono","Cascadia Code",Consolas,monospace;
+  --sans:"SF Pro Text","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);line-height:1.7;font-size:15px}
+.wrap{max-width:1080px;margin:0 auto;padding:36px 28px 80px}
+
+.kicker{font-family:var(--mono);font-size:12.5px;color:var(--brand);letter-spacing:1px}
+h1{font-size:28px;letter-spacing:-.8px;line-height:1.35;margin:8px 0 6px}
+.sub{color:var(--text-muted);font-size:14.5px;margin-bottom:22px}
+
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  padding:16px 18px;margin-bottom:14px}
+.card .lbl{font-size:11.5px;color:var(--text-muted);font-family:var(--mono);
+  letter-spacing:.4px;margin-bottom:7px}
+.frow{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start}
+.frow>div{flex:1 1 260px;min-width:240px}
+
+textarea,select,input[type=number]{font-family:var(--sans);font-size:14px;color:var(--text);
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 10px;width:100%}
+textarea{resize:vertical;min-height:62px;line-height:1.6}
+textarea:focus,select:focus,input:focus{outline:none;border-color:var(--brand)}
+.hint{font-size:12px;color:var(--text-muted);margin-top:6px}
+
+.seg{display:flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.seg button{font-family:var(--sans);font-size:13px;font-weight:600;background:var(--surface);
+  border:none;border-left:1px solid var(--border);padding:7px 13px;cursor:pointer;flex:1;white-space:nowrap}
+.seg button:first-child{border-left:none}
+.seg button.on{background:var(--brand-soft);color:var(--brand-deep)}
+.seg button:hover:not(.on){background:var(--muted-bg)}
+.budgetrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.budgetrow input{width:84px;flex:none}
+.unit{font-size:13px;color:var(--text-muted);font-family:var(--mono)}
+
+.gobar{display:flex;gap:12px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+button.go{font-family:var(--sans);font-size:14.5px;font-weight:650;background:var(--brand);
+  color:#fff;border:1px solid var(--brand);border-radius:9px;padding:9px 22px;cursor:pointer}
+button.go:disabled{background:#b9b9c4;border-color:#b9b9c4;cursor:not-allowed}
+button.ghost{font-family:var(--sans);font-size:13.5px;font-weight:600;background:var(--surface);
+  color:var(--text);border:1px solid var(--border);border-radius:9px;padding:9px 16px;cursor:pointer}
+.status{font-family:var(--mono);font-size:12.5px;color:var(--text-muted)}
+.status.run{color:var(--brand)}
+
+/* HUD */
+.hud{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);
+  border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px}
+.hud .cell{background:var(--surface);padding:12px 16px}
+.hud .k{font-size:11.5px;color:var(--text-muted);font-family:var(--mono);letter-spacing:.4px}
+.hud .v{font-family:var(--mono);font-size:21px;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums}
+.hud .v.small{font-size:15px;padding-top:5px}
+.hud .v.over{color:var(--red)}
+.hud .v.strong{color:var(--brand)} .hud .v.fast{color:var(--fast)}
+
+/* 时间轴 */
+.tl{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 0 6px}
+.lanes{position:relative;padding:0 18px}
+.lane{display:grid;grid-template-columns:66px 1fr;gap:12px;align-items:start;min-height:30px}
+.lane .name{font-family:var(--mono);font-size:11.5px;color:var(--text-muted);padding-top:7px}
+.track{position:relative;min-height:30px}
+.track .grid{position:absolute;inset:0;pointer-events:none}
+.track .grid i{position:absolute;top:0;bottom:0;width:1px;background:var(--border)}
+.rows{position:relative}
+.row{position:relative;height:26px;margin:3px 0}
+.bar{position:absolute;top:0;height:26px;border-radius:5px;overflow:hidden}
+.bar .fill{position:absolute;inset:0}
+.bar .ttft{position:absolute;top:0;bottom:0;left:0;background:rgba(255,255,255,.36)}
+.bar.llm-strong .fill{background:var(--brand)}
+.bar.llm-fast .fill{background:var(--fast)}
+.bar.tool .fill{background:var(--tool)}
+.bar.pending .fill{opacity:.45}
+.barlab{position:absolute;height:18px;display:flex;align-items:center;margin-left:7px;
+  font-family:var(--mono);font-size:10.5px;white-space:nowrap;background:var(--surface);
+  padding:0 5px;border-radius:4px;z-index:4}
+.barlab.llm-strong{color:var(--brand)} .barlab.llm-fast{color:var(--fast)}
+.barlab.tool{color:var(--tool)}
+
+.deadline{position:absolute;top:0;bottom:0;width:2px;background:var(--red);z-index:6}
+.deadline .tag{position:absolute;top:-19px;left:-1px;font-family:var(--mono);font-size:10.5px;
+  color:#fff;background:var(--red);padding:1px 6px;border-radius:4px;white-space:nowrap}
+.deadline .tag.left{left:-7px;transform:translateX(-100%)}
+.overband{position:absolute;top:0;bottom:0;right:0;background:var(--red-soft);opacity:.5;z-index:0}
+.playhead{position:absolute;top:0;bottom:0;width:1px;background:var(--text);opacity:.3;z-index:7}
+
+.batchb{position:absolute;top:-2px;height:9px;border-left:1.5px solid var(--fast);
+  border-right:1.5px solid var(--fast);border-top:1.5px solid var(--fast);border-radius:3px 3px 0 0}
+.batchb .l{position:absolute;top:9px;left:50%;transform:translateX(-50%);font-family:var(--mono);
+  font-size:10px;color:var(--fast);white-space:nowrap;background:var(--surface);padding:0 4px}
+
+.evt{position:absolute;height:22px;padding:0 9px;border-radius:11px;display:flex;align-items:center;
+  font-family:var(--mono);font-size:10.5px;white-space:nowrap;transform:translateX(-50%);z-index:5}
+.evt.wrap{background:var(--amber-soft);color:var(--amber);border:1px solid rgba(194,120,3,.35)}
+.evt.cmp{background:var(--brand-soft);color:var(--brand-deep);border:1px solid rgba(75,63,227,.3)}
+.axis{display:grid;grid-template-columns:66px 1fr;gap:12px;padding:6px 18px 0}
+.axis .tk{position:relative;height:16px;font-family:var(--mono);font-size:10px;color:var(--text-muted)}
+.axis .tk span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+
+/* 生成流 */
+.stream{background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  margin-top:14px;overflow:hidden}
+.stream .hd{display:flex;justify-content:space-between;align-items:center;padding:9px 16px;
+  border-bottom:1px solid var(--border);background:var(--muted-bg);font-family:var(--mono);font-size:11.5px;
+  color:var(--text-muted)}
+.stream .bd{padding:12px 16px;font-family:var(--mono);font-size:13px;line-height:1.65;
+  white-space:pre-wrap;max-height:190px;overflow-y:auto;min-height:52px;color:var(--text)}
+.stream .bd:empty::before{content:"等待生成…";color:var(--text-muted)}
+
+/* 结果 */
+.result{background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  margin-top:14px;overflow:hidden;display:none}
+.result.show{display:block}
+.result .head{display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:13px 18px;
+  border-bottom:1px solid var(--border);background:var(--muted-bg)}
+.badge{font-size:12.5px;font-weight:650;padding:3px 11px;border-radius:999px;font-family:var(--mono)}
+.badge.ok{background:var(--green-soft);color:var(--green)}
+.badge.bad{background:var(--red-soft);color:var(--red)}
+.badge.warn{background:var(--amber-soft);color:var(--amber)}
+.badge.info{background:var(--brand-soft);color:var(--brand-deep)}
+.result .ans{padding:15px 18px;font-size:14px;white-space:pre-wrap;max-height:300px;overflow-y:auto}
+.result .meta{padding:0 18px 14px;font-size:12.5px;color:var(--text-muted);font-family:var(--mono)}
+
+.err{background:var(--red-soft);border:1px solid rgba(208,52,44,.3);color:var(--red);
+  padding:14px 18px;border-radius:10px;font-family:var(--mono);font-size:13px;display:none;margin-top:14px}
+.err.show{display:block}
+
+footer{margin-top:30px;padding-top:16px;border-top:1px solid var(--border);
+  font-size:12.5px;color:var(--text-muted);line-height:1.85}
+footer code{font-family:var(--mono);background:var(--muted-bg);padding:1px 5px;border-radius:4px;font-size:12px}
+@media(max-width:720px){
+  .hud{grid-template-columns:repeat(2,1fr)}
+  .lane{grid-template-columns:52px 1fr}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="kicker">DeRT · DEADLINE-AWARE RUNTIME · 实时调度台</div>
+  <h1>给一个预算，看调度器怎么花</h1>
+  <p class="sub">任务、模型、代码都不变，唯一变量是你给的时间预算。每一次模型调用、每一批并行工具、
+    每一次收尾触发，都是<b>此刻真跑出来的</b>——不是录屏，也不是示意图。</p>
+
+  <div class="card">
+    <div class="frow">
+      <div>
+        <div class="lbl">任务（预设任务带规则判分；也可自己写）</div>
+        <select id="preset"></select>
+        <textarea id="task" placeholder="输入诊断任务，例如：最近 200 帧的 P95 延迟是多少？"></textarea>
+        <div class="hint" id="taskhint"></div>
+      </div>
+      <div>
+        <div class="lbl">时间预算</div>
+        <div class="budgetrow">
+          <div class="seg" id="budgetseg" style="flex:1">
+            <button data-b="2">2s</button>
+            <button data-b="4" class="on">4s</button>
+            <button data-b="8">8s</button>
+            <button data-b="30">30s</button>
+          </div>
+          <input type="number" id="budget" value="4" min="1" max="30" step="0.5">
+          <span class="unit">秒</span>
+        </div>
+        <div class="lbl" style="margin-top:14px">调度策略</div>
+        <div class="seg" id="strategy">
+          <button data-s="dert" class="on">DeRT v1.1 · 双档路由</button>
+          <button data-s="fast">固定快档 · 不感知预算</button>
+          <button data-s="strong">固定强档 · 不感知预算</button>
+        </div>
+        <div class="hint" id="metahint">读取后端配置…</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="gobar">
+    <button class="go" id="btn-go">开始运行</button>
+    <button class="ghost" id="btn-stop" disabled>断开</button>
+    <span class="status" id="status">空闲</span>
+  </div>
+
+  <div class="hud">
+    <div class="cell">
+      <div class="k">剩余预算</div>
+      <div class="v" id="h-remain">—</div>
+    </div>
+    <div class="cell">
+      <div class="k">当前档位</div>
+      <div class="v small" id="h-tier">—</div>
+    </div>
+    <div class="cell">
+      <div class="k">已用步数</div>
+      <div class="v" id="h-steps">—</div>
+    </div>
+    <div class="cell">
+      <div class="k">累计输出 TOKENS</div>
+      <div class="v" id="h-tok">—</div>
+    </div>
+  </div>
+
+  <div class="tl">
+    <div class="lanes">
+      <div class="lane" id="lane-llm">
+        <div class="name">模型调用</div>
+        <div class="track"><div class="grid"></div><div class="rows"></div></div>
+      </div>
+      <div class="lane" id="lane-tool">
+        <div class="name">工具调用</div>
+        <div class="track"><div class="grid"></div><div class="rows"></div></div>
+      </div>
+      <div class="lane" id="lane-evt">
+        <div class="name">调度事件</div>
+        <div class="track"><div class="grid"></div><div class="rows"></div></div>
+      </div>
+    </div>
+    <div class="axis"><div></div><div class="tk" id="axis"></div></div>
+  </div>
+
+  <div class="stream">
+    <div class="hd"><span>模型输出流（实时）</span><span id="stream-note">—</span></div>
+    <div class="bd" id="tokstream"></div>
+  </div>
+
+  <div class="result" id="result">
+    <div class="head">
+      <span class="badge" id="r-badge">—</span>
+      <span class="badge" id="r-grade" style="display:none">—</span>
+      <span class="unit" id="r-head-meta"></span>
+    </div>
+    <div class="ans" id="r-ans"></div>
+    <div class="meta" id="r-meta"></div>
+  </div>
+
+  <div class="err" id="err"></div>
+
+  <footer>
+    <b>怎么看这张图</b>：紫色 = 强档（deepseek-chat，按 token 计费），蓝色 = 快档（本地 qwen2.5:7b，零成本），
+    灰色 = 工具调用；条形内的浅色段是 <code>TTFT</code>（首 token 延迟）。红色竖线是预算线，右侧浅红区为超时区。
+    <code>wrap_up</code> 标记出现的那一刻，调度器判定余量不足、禁止再调工具并强制收尾。<br>
+    <b>与静态回放页的区别</b>：<a href="./index.html">index.html</a> 是预先跑好的确定性回放（可托管、面试现场不会翻车）；
+    本页是实时运行（依赖本机 Ollama 与 DeepSeek 密钥，只能本地跑）。<br>
+    <b>零依赖</b>：后端 <code>docs/demo/server.py</code> 只用 Python 标准库 <code>http.server</code> 手写 SSE——
+    运行时 <code>src/</code> 与演示后端都是零框架，<code>requirements.txt</code> 仍只有 <code>openai</code> 一项。
+  </footer>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = (x, n = 2) => (Math.round(x * 10 ** n) / 10 ** n).toFixed(n);
+
+let meta = null, presets = [];
+let budget = 4, strategy = "dert", presetId = "";
+let es = null, t0 = 0, running = false, rafId = 0;
+let bars = [], marks = [], batches = {};
+let nowT = 0, tokens = 0, steps = 0, tier = "—", curBar = null;
+let finalInfo = null;
+
+// ---------- 初始化 ----------
+
+async function boot() {
+  try {
+    meta = await (await fetch("/api/meta")).json();
+    presets = (await (await fetch("/api/presets")).json()).presets;
+  } catch (e) {
+    $("metahint").textContent = "无法连接后端（请用 python docs/demo/server.py 启动本页）";
+    $("btn-go").disabled = true;
+    return;
+  }
+  const sel = $("preset");
+  presets.forEach(p => {
+    const o = document.createElement("option");
+    o.value = p.id; o.textContent = `[${p.type}] ${p.id} — ${p.prompt.slice(0, 34)}${p.prompt.length > 34 ? "…" : ""}`;
+    sel.appendChild(o);
+  });
+  const firstT3 = presets.find(p => p.type === "T3") || presets[0];
+  sel.value = firstT3.id;
+  pickPreset(firstT3.id);
+
+  const m = [];
+  m.push(`快档 ${meta.fast_model}（本地）· 强档 ${meta.strong_model}` +
+         (meta.strong_available ? "" : "（不可用）"));
+  m.push(`强档配额 ${meta.strong_used_1h}/${meta.strong_cap} 次·小时`);
+  m.push(meta.cache ? "响应缓存：开（延迟不真实）" : "响应缓存：关（全实时）");
+  m.push(meta.warmed ? "本地模型已预热" : "本地模型预热中…");
+  $("metahint").textContent = m.join(" · ");
+  if (!meta.strong_available) {
+    [...document.querySelectorAll("#strategy button")].forEach(b => {
+      if (b.dataset.s !== "fast") b.disabled = true;
+    });
+    setStrategy("fast");
+  }
+}
+
+function pickPreset(id) {
+  const p = presets.find(x => x.id === id);
+  presetId = id;
+  if (p) {
+    $("task").value = p.prompt;
+    $("taskhint").textContent = `预设 ${p.id}（${p.type}）：跑完会用评估同款规则判分器判内容是否正确。`;
+  }
+}
+
+// ---------- 交互 ----------
+
+$("preset").onchange = e => pickPreset(e.target.value);
+$("task").oninput = () => { presetId = ""; $("taskhint").textContent = "自定义任务：无金答案，不判分（仍判是否按时）。"; };
+
+document.querySelectorAll("#budgetseg button").forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll("#budgetseg button").forEach(x => x.classList.remove("on"));
+    b.classList.add("on"); budget = parseFloat(b.dataset.b); $("budget").value = budget;
+  };
+});
+$("budget").oninput = e => {
+  const v = parseFloat(e.target.value);
+  if (!isNaN(v)) { budget = Math.max(1, Math.min(30, v)); }
+  document.querySelectorAll("#budgetseg button").forEach(x =>
+    x.classList.toggle("on", Math.abs(parseFloat(x.dataset.b) - budget) < 1e-9));
+};
+document.querySelectorAll("#strategy button").forEach(b => {
+  b.onclick = () => setStrategy(b.dataset.s);
+});
+function setStrategy(s) {
+  strategy = s;
+  document.querySelectorAll("#strategy button").forEach(x => x.classList.toggle("on", x.dataset.s === s));
+}
+
+function resetRun() {
+  bars = []; marks = []; batches = {}; tokens = 0; steps = 0; tier = "—"; curBar = null;
+  finalInfo = null; nowT = 0;
+  document.querySelectorAll(".rows").forEach(r => r.innerHTML = "");
+  document.querySelectorAll(".track").forEach(t => {
+    t.querySelectorAll(".deadline,.overband,.playhead,.batchb").forEach(x => x.remove());
+  });
+  $("tokstream").textContent = "";
+  $("result").classList.remove("show");
+  $("err").classList.remove("show");
+  $("h-remain").textContent = "—"; $("h-remain").className = "v";
+  $("h-tier").textContent = "—"; $("h-tier").className = "v small";
+  $("h-steps").textContent = "—"; $("h-tok").textContent = "—";
+  $("r-grade").style.display = "none";
+}
+
+$("btn-go").onclick = () => {
+  if (running) return;
+  const task = $("task").value.trim();
+  if (!task) { showErr("任务不能为空"); return; }
+  resetRun();
+  running = true;
+  $("btn-go").disabled = true; $("btn-stop").disabled = false;
+  $("status").textContent = "运行中…"; $("status").className = "status run";
+  const q = new URLSearchParams({ task, budget, strategy, preset: presetId });
+  t0 = performance.now();
+  es = new EventSource("/api/run?" + q.toString());
+  es.onmessage = ev => onEvent(JSON.parse(ev.data));
+  // 必须显式处理：EventSource 在流结束/出错时会**自动重连**，
+  // 若不断开就会把同一个任务再跑一遍（强档是付费的）。
+  es.onerror = () => { if (running) finish("连接中断"); else if (es) { es.close(); es = null; } };
+  loop();
+};
+
+$("btn-stop").onclick = () => { if (es) es.close(); finish("已断开"); };
+
+// ---------- 事件处理 ----------
+
+function onEvent(ev) {
+  if (ev.kind === "run_start") { addGuides(); return; }
+  if (ev.kind === "llm_start") {
+    steps++; tier = tierOf(ev.model);
+    const b = mkBar("llm", ev.ts, null, ev.model);
+    b.step = ev.step; b.wrap = !!ev.wrap_up; b.inflight = true;
+    bars.push(b); curBar = b;
+    $("stream-note").textContent = (tierOf(ev.model) === "strong" ? "强档" : "快档") +
+      " · 第 " + ev.step + " 步" + (ev.max_tokens ? ` · 收尾上限 ${ev.max_tokens} tokens` : "");
+    return;
+  }
+  if (ev.kind === "llm_call") {
+    const b = bars.find(x => x.lane === "llm" && x.inflight && x.step === ev.step) || curBar;
+    if (b) { b.t1 = b.t0 + ev.total; b.ttft = ev.ttft; b.inflight = false; b.tokens = ev.tokens_out; }
+    tokens += ev.tokens_out || 0;
+    return;
+  }
+  if (ev.kind === "tool_call") {
+    const b = mkBar("tool", ev.ts - ev.duration, ev.ts, ev.tool);
+    bars.push(b);
+    if (ev.batch) {
+      (batches[ev.batch] = batches[ev.batch] || []).push(b);
+      drawBatch(ev.batch);
+    }
+    return;
+  }
+  if (ev.kind === "token") {
+    $("tokstream").textContent += ev.text;
+    $("tokstream").scrollTop = $("tokstream").scrollHeight;
+    return;
+  }
+  if (ev.kind === "wrap_up") { addMark(ev.ts, "wrap", `wrap_up 收尾 · 余 ${fmt(ev.remaining, 2)}s`); return; }
+  if (ev.kind === "compress") { addMark(ev.ts, "cmp", "上下文压缩"); return; }
+  if (ev.kind === "run_end") return;   // trace 自带的终止事件，汇总以后面的 result 为准
+  if (ev.kind === "result") {
+    finalInfo = ev;
+    showResult(ev);
+    return;
+  }
+  if (ev.kind === "error") { showErr(ev.message); return; }
+  if (ev.kind === "done") { finish("完成"); return; }
+}
+
+function tierOf(model) {
+  if (!model) return "—";
+  const s = (meta && meta.strong_model) || "deepseek";
+  return model.includes(s.split("-")[0]) ? "strong" : "fast";
+}
+
+// ---------- 时间轴绘制 ----------
+
+function laneEl(lane) { return $(lane === "llm" ? "lane-llm" : lane === "tool" ? "lane-tool" : "lane-evt"); }
+
+function mkBar(lane, t0v, t1v, label) {
+  const rows = laneEl(lane).querySelector(".rows");
+  const row = document.createElement("div"); row.className = "row";
+  rows.appendChild(row);
+  const cls = lane === "llm" ? (tierOf(label) === "strong" ? "llm-strong" : "llm-fast") : "tool";
+  const el = document.createElement("div"); el.className = "bar " + cls;
+  el.innerHTML = '<div class="fill"></div><div class="ttft"></div>';
+  row.appendChild(el);
+  const lab = document.createElement("div"); lab.className = "barlab " + cls;
+  lab.textContent = lane === "llm" ? (tierOf(label) === "strong" ? "强档" : "快档") : label;
+  row.appendChild(lab);
+  return { lane, t0: t0v, t1: t1v, label, el, lab, row, cls, ttft: null };
+}
+
+function addMark(ts, kind, text) {
+  const rows = laneEl("evt").querySelector(".rows");
+  const row = document.createElement("div"); row.className = "row";
+  rows.appendChild(row);
+  const el = document.createElement("div"); el.className = "evt " + kind;
+  el.textContent = text;
+  row.appendChild(el);
+  marks.push({ ts, el });
+}
+
+function drawBatch(id) {
+  const g = batches[id];
+  if (!g || g.length < 2) return;
+  const track = laneEl("tool").querySelector(".track");
+  let old = track.querySelector(`.batchb[data-b="${id}"]`);
+  if (old) old.remove();
+  const el = document.createElement("div");
+  el.className = "batchb"; el.dataset.b = id;
+  const sum = g.reduce((a, b) => a + (b.t1 - b.t0), 0);
+  const wall = Math.max(...g.map(b => b.t1)) - Math.min(...g.map(b => b.t0));
+  el.dataset.a = Math.min(...g.map(b => b.t0));
+  el.dataset.z = Math.max(...g.map(b => b.t1));
+  el.innerHTML = `<span class="l">并行 ×${g.length} · 墙钟省 ${fmt(Math.max(0, (1 - wall / sum)) * 100, 0)}%</span>`;
+  track.appendChild(el);
+  batches[id].el = el;
+}
+
+function addGuides() {
+  document.querySelectorAll(".track").forEach((t, i) => {
+    const d = document.createElement("div"); d.className = "deadline";
+    d.innerHTML = i === 0 ? '<span class="tag">预算 ' + fmt(budget, 1) + 's</span>' : "";
+    t.appendChild(d);
+    const o = document.createElement("div"); o.className = "overband"; t.appendChild(o);
+    const p = document.createElement("div"); p.className = "playhead"; t.appendChild(p);
+  });
+}
+
+function scaleMax() {
+  let m = budget;
+  bars.forEach(b => { const t = b.t1 == null ? nowT : b.t1; if (t > m) m = t; });
+  return m * 1.06;
+}
+
+function loop() {
+  cancelAnimationFrame(rafId);
+  const tick = () => {
+    if (!running) return;
+    nowT = (performance.now() - t0) / 1000;
+    render();
+    rafId = requestAnimationFrame(tick);
+  };
+  rafId = requestAnimationFrame(tick);
+}
+
+function render() {
+  const S = scaleMax();
+  document.querySelectorAll(".track").forEach(t => {
+    const d = t.querySelector(".deadline"), o = t.querySelector(".overband"),
+          p = t.querySelector(".playhead");
+    const dl = budget / S * 100;
+    if (d) {
+      d.style.left = dl + "%";
+      const tag = d.querySelector(".tag");
+      if (tag) tag.classList.toggle("left", dl > 78);
+    }
+    if (o) { o.style.left = dl + "%"; o.style.width = Math.max(0, 100 - dl) + "%"; }
+    if (p) p.style.left = Math.min(100, nowT / S * 100) + "%";
+    // 网格刻度
+    const g = t.querySelector(".grid");
+    const stepT = S > 20 ? 5 : S > 8 ? 2 : 1;
+    const need = Math.floor(S / stepT);
+    if (g.dataset.n !== String(need) || g.dataset.s !== String(stepT)) {
+      g.dataset.n = need; g.dataset.s = stepT; g.innerHTML = "";
+      for (let i = 1; i <= need; i++) {
+        const i2 = document.createElement("i");
+        i2.style.left = (i * stepT / S * 100) + "%";
+        g.appendChild(i2);
+      }
+    }
+  });
+
+  bars.forEach(b => {
+    const t1 = b.t1 == null ? nowT : b.t1;
+    const w = Math.max(0.003, (t1 - b.t0) / S);
+    b.el.style.left = (b.t0 / S * 100) + "%";
+    b.el.style.width = (w * 100) + "%";
+    b.el.classList.toggle("pending", b.t1 == null);
+    const tt = b.el.querySelector(".ttft");
+    tt.style.width = b.ttft ? Math.min(100, b.ttft / Math.max(1e-6, t1 - b.t0) * 100) + "%" : "0%";
+    const right = (b.t0 / S * 100) + w * 100;
+    b.lab.style.left = right + "%";
+    b.lab.style.top = "4px";
+    b.lab.style.opacity = 1;
+  });
+
+  Object.values(batches).forEach(g => {
+    const el = g.el; if (!el) return;
+    const a = Math.min(...g.map(b => b.t0)), z = Math.max(...g.map(b => b.t1 == null ? nowT : b.t1));
+    el.style.left = (a / S * 100) + "%";
+    el.style.width = Math.max(0.003, (z - a) / S * 100) + "%";
+  });
+
+  marks.forEach(m => { m.el.style.left = (m.ts / S * 100) + "%"; m.el.style.top = "2px"; });
+
+  // 轴刻度
+  const ax = $("axis");
+  const stepT = S > 20 ? 5 : S > 8 ? 2 : 1;
+  if (ax.dataset.s !== String(stepT) || ax.dataset.n !== String(Math.floor(S / stepT))) {
+    ax.dataset.s = stepT; ax.dataset.n = Math.floor(S / stepT); ax.innerHTML = "";
+    for (let i = 0; i <= Math.floor(S / stepT); i++) {
+      const s = document.createElement("span");
+      s.style.left = (i * stepT / S * 100) + "%";
+      s.textContent = (i * stepT) + "s";
+      ax.appendChild(s);
+    }
+  }
+
+  const rem = budget - nowT;
+  const hr = $("h-remain");
+  hr.textContent = (rem >= 0 ? fmt(rem, 2) : "+" + fmt(-rem, 2)) + "s";
+  hr.className = "v" + (rem < 0 ? " over" : "");
+  $("h-tier").textContent = tier === "strong" ? "强档 · " + (meta ? meta.strong_model : "")
+    : tier === "fast" ? "快档 · " + (meta ? meta.fast_model : "") : "—";
+  $("h-tier").className = "v small " + (tier === "strong" ? "strong" : tier === "fast" ? "fast" : "");
+  $("h-steps").textContent = steps + " / 8";
+  $("h-tok").textContent = tokens;
+}
+
+// ---------- 收尾 ----------
+
+function showResult(ev) {
+  const t = ev.total_time, on = ev.on_time;
+  const b = $("r-badge");
+  b.textContent = on ? `按时 ${fmt(t, 2)}s / ${fmt(ev.budget, 1)}s` : `超时 ${fmt(t, 2)}s / ${fmt(ev.budget, 1)}s`;
+  b.className = "badge " + (on ? "ok" : "bad");
+  const g = $("r-grade");
+  if (ev.grade) {
+    g.style.display = "";
+    g.textContent = ev.grade.correct ? "内容正确" : "内容不正确";
+    g.className = "badge " + (ev.grade.correct ? "ok" : "warn");
+  } else { g.style.display = "none"; }
+  $("r-head-meta").textContent = `stop=${ev.stop_reason} · 步数 ${ev.steps} · ` +
+    (ev.used_strong ? "走强档" : "走快档") +
+    (ev.grade && ev.grade.why ? ` · 判分依据：${ev.grade.why}` : " · 自定义任务无判分");
+  $("r-ans").textContent = ev.answer || "（无最终答案）";
+  const s = ev.summary || {};
+  $("r-meta").textContent = `LLM 调用 ${s.llm_calls || 0} 次（${fmt(s.llm_time || 0, 2)}s）· ` +
+    `工具 ${s.tool_calls || 0} 次（${fmt(s.tool_time || 0, 2)}s）· ` +
+    `并行批 ${s.parallel_batches || 0} · tokens ${s.tokens_in || 0}→${s.tokens_out || 0}` +
+    ` · trace ${s.run_id || "—"}`;
+  $("result").classList.add("show");
+}
+
+function showErr(msg) {
+  $("err").textContent = msg;
+  $("err").classList.add("show");
+}
+
+function finish(why) {
+  running = false;
+  cancelAnimationFrame(rafId);
+  if (es) { es.close(); es = null; }
+  $("btn-go").disabled = false; $("btn-stop").disabled = true;
+  $("status").textContent = why + (finalInfo ? ` · 耗时 ${fmt(finalInfo.total_time, 2)}s` : "");
+  $("status").className = "status";
+  render();
+}
+
+boot();
+</script>
+</body>
+</html>
