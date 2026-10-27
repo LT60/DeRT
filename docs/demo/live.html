@@ -250,7 +250,7 @@ footer code{font-family:var(--mono);background:var(--muted-bg);padding:1px 5px;b
     <b>怎么看这张图</b>：紫色 = 强档（deepseek-chat，按 token 计费），蓝色 = 快档（本地 qwen2.5:7b，零成本），
     灰色 = 工具调用；条形内的浅色段是 <code>TTFT</code>（首 token 延迟）。红色竖线是预算线，右侧浅红区为超时区。
     <code>wrap_up</code> 标记出现的那一刻，调度器判定余量不足、禁止再调工具并强制收尾。<br>
-    <b>与静态回放页的区别</b>：<a href="./index.html">index.html</a> 是预先跑好的确定性回放（可托管、面试现场不会翻车）；
+    <b>与静态回放页的区别</b>：<a href="./index.html">index.html</a> 是预先跑好的确定性回放（可托管、演示现场不会翻车）；
     本页是实时运行（依赖本机 Ollama 与 DeepSeek 密钥，只能本地跑）。<br>
     <b>零依赖</b>：后端 <code>docs/demo/server.py</code> 只用 Python 标准库 <code>http.server</code> 手写 SSE——
     运行时 <code>src/</code> 与演示后端都是零框架，<code>requirements.txt</code> 仍只有 <code>openai</code> 一项。
