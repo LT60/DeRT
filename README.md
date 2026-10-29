@@ -1,21 +1,17 @@
 # DeRT — Deadline-aware Runtime for Tool-agents
 
-> 把「时间」当作和 Token 一样的一等公民资源来调度的 Agent 运行时。
+三层结构的 Agent 应用：底层是手写的 ReAct 运行时，中间是 FastAPI + SSE 服务层，上层是可视化调度台。核心研究问题是「模型调度在什么预算下才真正有收益」，用 6100 次配对受控运行测出了边界。
 
->
+## 由什么组成
 
-## 密钥管理（本仓库不包含任何 API 密钥）
+| 层 | 位置 | 做什么 |
+|---|---|---|
+| 运行时 | `src/` 1,444 行 | ReAct 循环、上下文三策略压缩、双档调度器、依赖图并行工具 |
+| 服务层 | `service/` 1,089 行 | FastAPI + SSE 流式输出、断点续跑、人工审批门、MCP 协议出口 |
+| 前端 | `service/static/` | 交互式调度台，自己出题、实时看每一步决策 |
+| 评估 | `eval/` 6,472 行 | 配对设计、McNemar、bootstrap、离线回放、成本量纲 |
 
-**API 密钥红线**：本项目所有密钥只存在于本机用户级环境变量（`DEEPSEEK_API_KEY`），任何项目文件中都不应出现 `sk-` 开头的字符串。上传公开仓库前，人类协作者或执行上传的 agent 必须运行：
-
-```powershell
-# 项目根目录执行；任何输出命中 = 禁止上传，先清除
-Get-ChildItem -Recurse -File -Exclude *.pyc |
-  Where-Object FullName -notmatch '__pycache__' |
-  Select-String -Pattern 'sk-[a-zA-Z0-9]{20,}' -List
-```
-
-同时确认 `.gitignore` 未被删除、`git status` 中无 `eval/cache/` 与 `eval/traces/` 被意外追踪。
+运行时与服务层只用 Python 标准库，外部依赖只有 `openai` 一个。
 
 ## 核心论点
 
@@ -332,3 +328,18 @@ DeRT/
 3. **成本量纲回放**（tokens×公开价，横轴换元）：v3emp′ 全程 ≥ A′，0.010¥ 即 100/100 封顶（A′ 需 0.020¥），强档率恒 27%；价格精确已知 → 成本量纲不需要自适应门。
 
 边界：级联只适用宽预算（8s 以下升级窗口不足，mid-run 中止升级待做）；judge 对幻觉类「自信地错」未单独测；模拟升级路径用 A 历史结果近似重跑（偏乐观）。脚本 `eval/judge_audit.py` / `replay_cascade.py` / `replay_cost.py` / `plot_generalization.py`；图 `docs/figures/generalization.png`；详述收官文档「三⅘」节。
+
+---
+
+## 密钥管理（本仓库不包含任何 API 密钥）
+
+**API 密钥红线**：本项目所有密钥只存在于本机用户级环境变量（`DEEPSEEK_API_KEY`），任何项目文件中都不应出现 `sk-` 开头的字符串。上传公开仓库前，人类协作者或执行上传的 agent 必须运行：
+
+```powershell
+# 项目根目录执行；任何输出命中 = 禁止上传，先清除
+Get-ChildItem -Recurse -File -Exclude *.pyc |
+  Where-Object FullName -notmatch '__pycache__' |
+  Select-String -Pattern 'sk-[a-zA-Z0-9]{20,}' -List
+```
+
+同时确认 `.gitignore` 未被删除、`git status` 中无 `eval/cache/` 与 `eval/traces/` 被意外追踪。
